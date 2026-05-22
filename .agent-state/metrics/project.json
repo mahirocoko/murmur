@@ -1,0 +1,22 @@
+{
+  "generatedAt": "2026-05-22T17:00:20",
+  "source": "rrr-derived",
+  "totalSessions": 1,
+  "todaySessions": 1,
+  "activeDays": 1,
+  "avgSessionsPerActiveDay": 1.0,
+  "sizes": {
+    "today": "small",
+    "thresholds": {
+      "smallMax": 1,
+      "mediumMax": 3,
+      "largeMin": 4
+    }
+  },
+  "branches": {
+    "current": {
+      "name": "main",
+      "recentCommits30d": 1
+    }
+  }
+}
