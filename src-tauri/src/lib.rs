@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, PhysicalPosition, WindowEvent,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Size, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{Code, Modifiers, ShortcutState};
 
@@ -49,6 +49,7 @@ struct TranscriptionResult {
 }
 
 type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
+type AudioLevelThrottle = Arc<Mutex<u128>>;
 
 struct NativeRecording {
     wav_path: PathBuf,
@@ -312,11 +313,44 @@ fn wav_spec_from_config(config: &cpal::SupportedStreamConfig) -> hound::WavSpec 
     }
 }
 
-fn write_input_data<T, U>(input: &[T], writer: &WavWriterHandle)
+fn emit_audio_level<T>(input: &[T], app: &AppHandle, last_emit: &AudioLevelThrottle)
+where
+    T: Sample,
+    f32: FromSample<T>,
+{
+    let now = timestamp_ms();
+    let should_emit = if let Ok(mut last_emit) = last_emit.try_lock() {
+        if now.saturating_sub(*last_emit) < 40 {
+            false
+        } else {
+            *last_emit = now;
+            true
+        }
+    } else {
+        false
+    };
+
+    if !should_emit || input.is_empty() {
+        return;
+    }
+
+    let sum = input.iter().fold(0.0_f32, |acc, &sample| {
+        let sample = f32::from_sample(sample).clamp(-1.0, 1.0);
+        acc + sample * sample
+    });
+    let rms = (sum / input.len() as f32).sqrt();
+    let level = (rms * 8.0).clamp(0.0, 1.0);
+    let _ = app.emit("audio-level", level);
+}
+
+fn write_input_data<T, U>(input: &[T], writer: &WavWriterHandle, app: &AppHandle, last_emit: &AudioLevelThrottle)
 where
     T: Sample,
     U: Sample + hound::Sample + FromSample<T>,
+    f32: FromSample<T>,
 {
+    emit_audio_level(input, app, last_emit);
+
     if let Ok(mut guard) = writer.try_lock() {
         if let Some(writer) = guard.as_mut() {
             for &sample in input.iter() {
@@ -456,9 +490,17 @@ fn get_app_plan() -> Vec<&'static str> {
 
 #[tauri::command]
 fn show_indicator(app: AppHandle, state: String) -> Result<(), String> {
+    const INDICATOR_WIDTH: f64 = 430.0;
+    const INDICATOR_HEIGHT: f64 = 124.0;
+
     let window = app
         .get_webview_window("indicator")
         .ok_or_else(|| "indicator window not found".to_string())?;
+
+    let _ = window.set_size(Size::Logical(LogicalSize::new(
+        INDICATOR_WIDTH,
+        INDICATOR_HEIGHT,
+    )));
 
     let monitor = window
         .current_monitor()
@@ -466,10 +508,13 @@ fn show_indicator(app: AppHandle, state: String) -> Result<(), String> {
         .or_else(|| app.available_monitors().ok().and_then(|mut monitors| monitors.pop()));
 
     if let Some(monitor) = monitor {
+        let scale_factor = monitor.scale_factor();
         let size = monitor.size();
         let position = monitor.position();
-        let x = position.x + ((size.width as i32 - 260) / 2);
-        let y = position.y + 18;
+
+        let window_width = (INDICATOR_WIDTH * scale_factor) as i32;
+        let x = position.x + ((size.width as i32 - window_width) / 2);
+        let y = position.y + (28.0 * scale_factor) as i32;
         let _ = window.set_position(PhysicalPosition::new(x, y));
     }
 
@@ -677,33 +722,50 @@ fn start_native_recording(app: &AppHandle) -> Result<(), String> {
         .map_err(|error| format!("สร้างไฟล์ WAV ไม่สำเร็จ: {error}"))?;
     let writer = Arc::new(Mutex::new(Some(writer)));
     let writer_for_stream = writer.clone();
+    let audio_level_throttle: AudioLevelThrottle = Arc::new(Mutex::new(0));
     let err_fn = |error| eprintln!("audio input stream error: {error}");
 
     let stream = match config.sample_format() {
-        cpal::SampleFormat::I8 => device.build_input_stream(
-            &config.clone().into(),
-            move |data, _: &_| write_input_data::<i8, i8>(data, &writer_for_stream),
-            err_fn,
-            None,
-        ),
-        cpal::SampleFormat::I16 => device.build_input_stream(
-            &config.clone().into(),
-            move |data, _: &_| write_input_data::<i16, i16>(data, &writer_for_stream),
-            err_fn,
-            None,
-        ),
-        cpal::SampleFormat::I32 => device.build_input_stream(
-            &config.clone().into(),
-            move |data, _: &_| write_input_data::<i32, i32>(data, &writer_for_stream),
-            err_fn,
-            None,
-        ),
-        cpal::SampleFormat::F32 => device.build_input_stream(
-            &config.clone().into(),
-            move |data, _: &_| write_input_data::<f32, f32>(data, &writer_for_stream),
-            err_fn,
-            None,
-        ),
+        cpal::SampleFormat::I8 => {
+            let app = app.clone();
+            let last_emit = audio_level_throttle.clone();
+            device.build_input_stream(
+                &config.clone().into(),
+                move |data, _: &_| write_input_data::<i8, i8>(data, &writer_for_stream, &app, &last_emit),
+                err_fn,
+                None,
+            )
+        }
+        cpal::SampleFormat::I16 => {
+            let app = app.clone();
+            let last_emit = audio_level_throttle.clone();
+            device.build_input_stream(
+                &config.clone().into(),
+                move |data, _: &_| write_input_data::<i16, i16>(data, &writer_for_stream, &app, &last_emit),
+                err_fn,
+                None,
+            )
+        }
+        cpal::SampleFormat::I32 => {
+            let app = app.clone();
+            let last_emit = audio_level_throttle.clone();
+            device.build_input_stream(
+                &config.clone().into(),
+                move |data, _: &_| write_input_data::<i32, i32>(data, &writer_for_stream, &app, &last_emit),
+                err_fn,
+                None,
+            )
+        }
+        cpal::SampleFormat::F32 => {
+            let app = app.clone();
+            let last_emit = audio_level_throttle.clone();
+            device.build_input_stream(
+                &config.clone().into(),
+                move |data, _: &_| write_input_data::<f32, f32>(data, &writer_for_stream, &app, &last_emit),
+                err_fn,
+                None,
+            )
+        }
         sample_format => return Err(format!("microphone sample format ยังไม่รองรับ: {sample_format}")),
     }
     .map_err(|error| format!("เริ่ม audio input stream ไม่สำเร็จ: {error}"))?;
@@ -713,6 +775,7 @@ fn start_native_recording(app: &AppHandle) -> Result<(), String> {
         .map_err(|error| format!("เปิด microphone stream ไม่สำเร็จ: {error}"))?;
 
     *recording_guard = Some(NativeRecording { wav_path, stream, writer });
+
 
     let _ = app.emit("dictation-state", "recording");
     let _ = show_indicator(app.clone(), "Recording".to_string());
@@ -771,7 +834,7 @@ fn finish_native_recording(recording: NativeRecording, app: AppHandle, preferenc
     let _ = hide_indicator(app);
 }
 
-fn stop_native_recording(app: AppHandle) -> Result<(), String> {
+fn take_native_recording(app: &AppHandle) -> Result<Option<NativeRecording>, String> {
     let state = app.state::<NativeRecorderState>();
     let recording = {
         let mut recording_guard = state
@@ -781,8 +844,11 @@ fn stop_native_recording(app: AppHandle) -> Result<(), String> {
         recording_guard.take()
     };
 
-    let Some(recording) = recording else { return Ok(()); };
+    Ok(recording)
+}
 
+fn stop_native_recording(app: AppHandle) -> Result<(), String> {
+    let Some(recording) = take_native_recording(&app)? else { return Ok(()); };
     let _ = app.emit("dictation-state", "transcribing");
     let _ = show_indicator(app.clone(), "Transcribing".to_string());
 
@@ -797,6 +863,19 @@ fn stop_native_recording(app: AppHandle) -> Result<(), String> {
 
     std::thread::spawn(move || finish_native_recording(recording, app, preferences));
 
+    Ok(())
+}
+
+#[tauri::command]
+fn cancel_native_recording(app: AppHandle) -> Result<(), String> {
+    let Some(recording) = take_native_recording(&app)? else { return Ok(()); };
+    drop(recording.stream);
+    if let Ok(mut guard) = recording.writer.lock() {
+        let _ = guard.take();
+    }
+    let _ = fs::remove_file(&recording.wav_path);
+    let _ = app.emit("dictation-state", "idle");
+    let _ = hide_indicator(app);
     Ok(())
 }
 
@@ -816,21 +895,45 @@ fn toggle_native_recording(app: AppHandle) -> Result<(), String> {
 
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_size(Size::Logical(LogicalSize::new(360.0, 430.0)));
         let _ = window.show();
         let _ = window.set_focus();
     }
 }
 
+#[tauri::command]
+fn hide_main_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window not found".to_string())?;
+    window.hide().map_err(|error| error.to_string())
+}
+
 fn setup_global_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
     app.plugin(
         tauri_plugin_global_shortcut::Builder::new()
-            .with_shortcuts(["alt+space"])
+            .with_shortcuts(["alt+space", "esc"])
             .expect("default dictation shortcut should be valid")
             .with_handler(|app, shortcut, event| {
-                if event.state == ShortcutState::Pressed
-                    && shortcut.matches(Modifiers::ALT, Code::Space)
-                {
+                if event.state != ShortcutState::Pressed {
+                    return;
+                }
+
+                if shortcut.matches(Modifiers::ALT, Code::Space) {
                     let _ = toggle_native_recording(app.clone());
+                    return;
+                }
+
+                if shortcut.matches(Modifiers::empty(), Code::Escape) {
+                    let is_recording = app
+                        .state::<NativeRecorderState>()
+                        .recording
+                        .lock()
+                        .map(|guard| guard.is_some())
+                        .unwrap_or(false);
+                    if is_recording {
+                        let _ = cancel_native_recording(app.clone());
+                    }
                 }
             })
             .build(),
@@ -932,10 +1035,12 @@ pub fn run() {
             get_app_plan,
             list_available_models,
             hide_indicator,
+            hide_main_window,
             paste_clipboard,
             show_indicator,
             set_native_preferences,
             toggle_native_recording,
+            cancel_native_recording,
             transcribe_audio
         ])
         .run(tauri::generate_context!())

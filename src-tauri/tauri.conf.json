@@ -14,16 +14,26 @@
       {
         "label": "main",
         "title": "Mahiro Whisper",
-        "width": 760,
-        "height": 560,
-        "resizable": true,
-        "visible": true
+        "width": 360,
+        "height": 430,
+        "resizable": false,
+        "visible": true,
+        "decorations": false,
+        "transparent": true,
+        "backgroundColor": "#00000000",
+        "windowEffects": {
+          "effects": [
+            "windowBackground"
+          ],
+          "state": "followsWindowActiveState",
+          "radius": 14
+        }
       },
       {
         "label": "indicator",
         "title": "Mahiro Whisper Indicator",
-        "width": 260,
-        "height": 64,
+        "width": 430,
+        "height": 124,
         "resizable": false,
         "decorations": false,
         "alwaysOnTop": true,
@@ -32,12 +42,14 @@
         "focus": false,
         "focusable": false,
         "visible": false,
-        "transparent": false
+        "transparent": true,
+        "backgroundColor": "#00000000"
       }
     ],
     "security": {
       "csp": null
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,

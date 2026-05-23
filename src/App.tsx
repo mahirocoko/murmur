@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Effect, EffectState, getCurrentWindow } from "@tauri-apps/api/window";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ComponentType, SVGProps } from "react";
+import IconHistory from "~icons/lucide/history";
+import IconLayers from "~icons/lucide/layers";
+import IconMic from "~icons/lucide/mic";
+import IconSettings from "~icons/lucide/settings";
 import "./App.css";
 
 interface IWhisperStatus {
@@ -31,16 +36,37 @@ interface IModelInfo {
 
 type DictationState = "idle" | "requesting-mic" | "recording" | "transcribing" | "pasting" | "done" | "error";
 type OutputMode = "copy" | "paste";
-type View = "home" | "modes" | "vocabulary" | "settings" | "sound" | "models" | "history";
+type DictationMode = "quick" | "review" | "transform";
+type View = "home" | "modes" | "settings" | "history";
 
-const navItems: Array<{ id: View; label: string; icon: string }> = [
-  { id: "home", label: "Home", icon: "⌂" },
-  { id: "modes", label: "Modes", icon: "✦" },
-  { id: "vocabulary", label: "Vocabulary", icon: "▣" },
-  { id: "settings", label: "Configuration", icon: "⚙" },
-  { id: "sound", label: "Sound", icon: "◉" },
-  { id: "models", label: "Models library", icon: "⬡" },
-  { id: "history", label: "History", icon: "↺" },
+const modeOptions: Array<{
+  id: DictationMode;
+  title: string;
+  summary: string;
+  detail: string;
+  output: OutputMode;
+}> = [
+  {
+    id: "quick",
+    title: "Quick Dictation",
+    summary: "Record, transcribe, paste.",
+    detail: "For daily writing where the focused field should receive the transcript immediately.",
+    output: "paste",
+  },
+  {
+    id: "review",
+    title: "Review First",
+    summary: "Record, transcribe, copy.",
+    detail: "For longer notes where you want the text in Mahiro Whisper before using it elsewhere.",
+    output: "copy",
+  },
+  {
+    id: "transform",
+    title: "Transform",
+    summary: "Capture now, rewrite later.",
+    detail: "Reserved for cleanup, rewrite, translate, and app-specific prompt transforms.",
+    output: "copy",
+  },
 ];
 
 function getSupportedMimeType() {
@@ -50,39 +76,105 @@ function getSupportedMimeType() {
 
 function IndicatorWindow() {
   const [state, setState] = useState("recording");
+  const [audioLevel, setAudioLevel] = useState(0);
+  const [waveTick, setWaveTick] = useState(0);
 
   useEffect(() => {
+    document.documentElement.dataset.window = "indicator";
+    document.body.dataset.window = "indicator";
+
     const normalize = (value: string) => setState(value.toLowerCase());
     const unlistenIndicator = listen<string>("indicator-state", (event) => normalize(event.payload));
     const unlistenDictation = listen<string>("dictation-state", (event) => normalize(event.payload));
+    const unlistenAudioLevel = listen<number>("audio-level", (event) => {
+      const nextLevel = Number.isFinite(event.payload) ? Math.max(0, Math.min(event.payload, 1)) : 0;
+      setAudioLevel((currentLevel) => {
+        if (nextLevel > currentLevel) return currentLevel * 0.2 + nextLevel * 0.8;
+        return currentLevel * 0.8 + nextLevel * 0.2;
+      });
+    });
 
     return () => {
+      delete document.documentElement.dataset.window;
+      delete document.body.dataset.window;
       void unlistenIndicator.then((dispose) => dispose());
       void unlistenDictation.then((dispose) => dispose());
+      void unlistenAudioLevel.then((dispose) => dispose());
     };
   }, []);
 
-  const copy: Record<string, { title: string; detail: string }> = {
+
+  useEffect(() => {
+    if (state !== "recording") return;
+
+    let frame = 0;
+    let last = 0;
+    const animate = (now: number) => {
+      if (now - last > 70) {
+        last = now;
+        setWaveTick((tick) => tick + 1);
+      }
+      frame = requestAnimationFrame(animate);
+    };
+
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, [state]);
+
+  const waveHeights = useMemo(() => {
+    const level = state === "recording" ? Math.max(0.1, Math.sqrt(audioLevel) * 1.35) : 0;
+    const now = waveTick * 0.55;
+    const floor = 3;
+    const max = 54;
+
+    return Array.from({ length: 78 }, (_, index) => {
+      const position = index / 77;
+      const center = 1 - Math.min(1, Math.abs(position - 0.45) * 2.25);
+      const secondLobe = Math.max(0, 1 - Math.abs(position - 0.68) * 8);
+      const leftLobe = Math.max(0, 1 - Math.abs(position - 0.24) * 7);
+      const envelope = Math.max(0.06, center * 0.92 + secondLobe * 0.52 + leftLobe * 0.46);
+      const ripple = 0.72 + Math.sin(now + index * 0.38) * 0.18 + Math.cos(now * 0.52 + index * 0.21) * 0.1;
+      const breath = 0.75 + Math.sin(now * 0.72 + index * 0.17) * 0.25;
+      const height = floor + level * max * envelope * ripple * breath;
+
+      return Math.max(floor, Math.min(max, height));
+    });
+  }, [audioLevel, state, waveTick]);
+
+  const indicatorCopy: Record<string, { title: string; detail: string }> = {
     recording: { title: "Listening", detail: "Press ⌥ Space to stop" },
-    transcribing: { title: "Transcribing", detail: "Converting speech to text" },
-    pasting: { title: "Pasting", detail: "Sending text to the focused app" },
-    done: { title: "Done", detail: "Text is ready" },
-    error: { title: "Needs attention", detail: "Open Control Center" },
+    transcribing: { title: "Transcribing", detail: "Turning speech into text" },
+    pasting: { title: "Pasting", detail: "Sending text to the active app" },
+    done: { title: "Done", detail: "Transcript copied" },
+    error: { title: "Needs attention", detail: "Open Mahiro Whisper" },
   };
-  const current = copy[state] ?? copy.recording;
+  const copy = indicatorCopy[state] ?? { title: "Working", detail: "Mahiro Whisper" };
 
   return (
     <main className={`indicator-shell ${state}`}>
-      <div className={`indicator-dot ${state}`} />
-      <div className="indicator-copy">
-        <strong>{current.title}</strong>
-        <span>{current.detail}</span>
+      <div className="indicator-wave" aria-hidden="true">
+        {state === "recording" ? (
+          waveHeights.map((height, index) => (
+            <i key={index} style={{ height: `${height}px`, opacity: 0.42 + Math.min(audioLevel * 1.25, 0.58) }} />
+          ))
+        ) : (
+          <div className="spinner" />
+        )}
       </div>
-      {state === "recording" ? (
-        <div className="wave" aria-hidden="true"><i /><i /><i /><i /></div>
-      ) : (
-        <div className="spinner" aria-hidden="true" />
-      )}
+      <div className="indicator-footer">
+        <div className="indicator-mode">
+          <span className={`indicator-mic ${state}`} aria-hidden="true" />
+          <strong>{copy.title}</strong>
+          <span>{copy.detail}</span>
+        </div>
+        <div className="indicator-actions">
+          <kbd>⌥</kbd>
+          <kbd>Space</kbd>
+          <span>toggle</span>
+          <kbd>esc</kbd>
+          <span>cancel</span>
+        </div>
+      </div>
     </main>
   );
 }
@@ -102,7 +194,9 @@ function MainApp() {
   const [outputMode, setOutputMode] = useState<OutputMode>(() =>
     localStorage.getItem("mahiro-whisper-output-mode") === "copy" ? "copy" : "paste",
   );
-
+  const [dictationMode, setDictationMode] = useState<DictationMode>(() =>
+    (localStorage.getItem("mahiro-whisper-mode") as DictationMode | null) ?? "quick",
+  );
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -113,6 +207,16 @@ function MainApp() {
     stateRef.current = nextState;
     setDictationState(nextState);
   }
+
+  useEffect(() => {
+    void getCurrentWindow()
+      .setEffects({
+        effects: [Effect.WindowBackground],
+        state: EffectState.FollowsWindowActiveState,
+        radius: 14,
+      })
+      .catch(() => undefined);
+  }, []);
 
   async function checkWhisper() {
     setIsChecking(true);
@@ -165,9 +269,7 @@ function MainApp() {
       setHistory((items) => [result.transcript, ...items].slice(0, 20));
       await writeText(result.transcript);
 
-      if (outputMode === "paste") {
-        await invoke("paste_clipboard");
-      }
+      if (outputMode === "paste") await invoke("paste_clipboard");
 
       updateDictationState("done");
       void invoke("hide_indicator");
@@ -236,6 +338,13 @@ function MainApp() {
     }
   }, []);
 
+  const selectMode = useCallback((mode: DictationMode) => {
+    const option = modeOptions.find((item) => item.id === mode);
+    if (!option) return;
+    setDictationMode(mode);
+    setOutputMode(option.output);
+  }, []);
+
   useEffect(() => {
     localStorage.setItem("mahiro-whisper-language", language);
   }, [language]);
@@ -247,6 +356,10 @@ function MainApp() {
   useEffect(() => {
     localStorage.setItem("mahiro-whisper-output-mode", outputMode);
   }, [outputMode]);
+
+  useEffect(() => {
+    localStorage.setItem("mahiro-whisper-mode", dictationMode);
+  }, [dictationMode]);
 
   useEffect(() => {
     void invoke("set_native_preferences", {
@@ -280,7 +393,7 @@ function MainApp() {
       if (action === "settings") setActiveView("settings");
       if (action === "history") setActiveView("history");
       if (action === "status") {
-        setActiveView("models");
+        setActiveView("settings");
         void checkWhisper();
       }
       if (action === "home") setActiveView("home");
@@ -296,123 +409,200 @@ function MainApp() {
     };
   }, []);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (stateRef.current !== "recording") return;
+      event.preventDefault();
+      void invoke("cancel_native_recording");
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   const stateLabel: Record<DictationState, string> = {
     idle: "Ready",
-    "requesting-mic": "Requesting mic",
-    recording: "Recording",
+    "requesting-mic": "Requesting microphone",
+    recording: "Listening",
     transcribing: "Transcribing",
     pasting: "Pasting",
-    done: outputMode === "paste" ? "Copied and pasted" : "Copied",
+    done: outputMode === "paste" ? "Pasted" : "Copied",
     error: "Needs attention",
   };
 
+  const stateDetail: Record<DictationState, string> = {
+    idle: "Use ⌥ Space from any app. Mahiro Whisper records in the background and returns text to where you were working.",
+    "requesting-mic": "Waiting for macOS microphone access.",
+    recording: "Speak normally. Press ⌥ Space again when you are done.",
+    transcribing: "Audio is being converted locally through whisper.cpp.",
+    pasting: "The transcript is on the clipboard and is being sent to the active app.",
+    done: outputMode === "paste" ? "Transcript was copied and pasted." : "Transcript was copied to the clipboard.",
+    error: "Check permissions, model path, or the local whisper.cpp engine.",
+  };
+
   const statusReady = Boolean(whisperStatus?.available);
-  const transcriptCount = history.length;
+  const selectedMode = modeOptions.find((mode) => mode.id === dictationMode) ?? modeOptions[0];
+  const canToggle = dictationState !== "requesting-mic" && dictationState !== "transcribing" && dictationState !== "pasting";
+  const primaryLabel = dictationState === "recording" ? "Stop" : dictationState === "done" ? "Record again" : "Record";
+  const topTabs: Array<{ id: View; label: string; icon: ComponentType<SVGProps<SVGSVGElement>> }> = [
+    { id: "home", label: "Dictate", icon: IconMic },
+    { id: "modes", label: "Modes", icon: IconLayers },
+    { id: "history", label: "History", icon: IconHistory },
+    { id: "settings", label: "Settings", icon: IconSettings },
+  ];
+
 
   return (
-    <main className="app-frame">
-      <aside className="sidebar">
-        <div className="traffic-lights" aria-hidden="true"><span /><span /><span /></div>
-        <nav>
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={activeView === item.id ? "nav-item active" : "nav-item"}
-              onClick={() => setActiveView(item.id)}
-            >
-              <span>{item.icon}</span>
-              {item.label}
-            </button>
-          ))}
+    <main className="compact-shell">
+      <header className="compact-titlebar" data-tauri-drag-region>
+        <button
+          type="button"
+          className="window-close"
+          aria-label="Close Mahiro Whisper"
+          title="Close"
+          data-tauri-drag-region="false"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            void invoke("hide_main_window").catch(() => getCurrentWindow().hide());
+          }}
+        />
+        <nav className="top-tabs" aria-label="Mahiro Whisper sections" data-tauri-drag-region>
+          {topTabs.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                data-tauri-drag-region
+                className={activeView === item.id ? "top-tab active" : "top-tab"}
+                onClick={() => setActiveView(item.id)}
+                aria-label={item.label}
+                title={item.label}
+              >
+                <span><Icon aria-hidden="true" /></span>
+              </button>
+            );
+          })}
         </nav>
-        <div className="sidebar-footer">
-          <strong>Mahiro Whisper</strong>
-          <span>{statusReady ? "Local engine ready" : "Setup needed"}</span>
-        </div>
-      </aside>
+      </header>
 
-      <section className="content-pane">
-        <header className="topbar">
-          <div>
-            <span className="kicker">Control Center</span>
-            <h1>{navItems.find((item) => item.id === activeView)?.label}</h1>
-          </div>
-          <div className="device-pill">Tray-first · ⌥ Space</div>
-        </header>
-
-        <section className="metrics-row">
-          <article><strong>{transcriptCount}</strong><span>Transcripts</span></article>
-          <article><strong>{statusReady ? "Ready" : "Setup"}</strong><span>Engine</span></article>
-          <article><strong>{language}</strong><span>Language</span></article>
-          <article><strong>{outputMode === "paste" ? "Paste" : "Copy"}</strong><span>Output</span></article>
-        </section>
-
+      <section className="compact-content">
         {activeView === "home" ? (
-          <section className="view-stack">
-            <div className="record-card">
-              <div>
-                <span className={`status-dot ${dictationState}`} />
-                <h2>{stateLabel[dictationState]}</h2>
-                <p>Press ⌥ Space from any app. Mahiro Whisper records in the background and pastes back into the focused field.</p>
+          <section className="compact-stack">
+            <div className="status-card">
+              <div className="status-card-main">
+                <span className={`status-mark ${dictationState}`} />
+                <div>
+                  <h1>{stateLabel[dictationState]}</h1>
+                  <p>{stateDetail[dictationState]}</p>
+                </div>
               </div>
               <button
                 type="button"
-                className={dictationState === "recording" ? "danger-action" : "primary-action"}
+                className={dictationState === "recording" ? "record-button stop" : "record-button"}
                 onClick={toggleDictation}
-                disabled={dictationState === "requesting-mic" || dictationState === "transcribing"}
+                disabled={!canToggle}
               >
-                {dictationState === "recording" ? "Stop & transcribe" : "Start recording"}
-                <kbd>⌥ Space</kbd>
+                {primaryLabel}
               </button>
             </div>
 
             {errorMessage ? <div className="notice error">{errorMessage}</div> : null}
-            {lastShortcutEvent ? <div className="notice">Tray and shortcut controls are connected.</div> : null}
+            {lastShortcutEvent ? <div className="notice">Shortcut and tray are connected.</div> : null}
 
-            {transcript ? (
-              <div className="transcript-panel">
-                <span className="kicker">Latest transcript</span>
-                <p>{transcript}</p>
-                <button type="button" onClick={() => writeText(transcript)}>Copy again</button>
+            <div className="compact-row">
+              <span>Mode</span>
+              <button type="button" onClick={() => setActiveView("modes")}>{selectedMode.title}</button>
+            </div>
+            <div className="compact-row">
+              <span>Output</span>
+              <strong>{outputMode === "paste" ? "Auto-paste" : "Copy only"}</strong>
+            </div>
+            <div className="compact-row">
+              <span>Shortcut</span>
+              <strong>⌥ Space</strong>
+            </div>
+
+            <section className="transcript-box">
+              <div className="panel-heading">
+                <h2>Latest transcript</h2>
+                {transcript ? <button type="button" onClick={() => writeText(transcript)}>Copy</button> : null}
               </div>
-            ) : null}
+              {transcript ? <p className="transcript-text">{transcript}</p> : <p>No transcript yet.</p>}
+            </section>
+          </section>
+        ) : null}
 
+        {activeView === "modes" ? (
+          <section className="compact-stack">
+            <div className="section-header">
+              <h1>Modes</h1>
+              <p>Choose what happens after speech becomes text.</p>
+            </div>
+            <div className="mode-list">
+              {modeOptions.map((mode) => (
+                <button
+                  key={mode.id}
+                  type="button"
+                  className={dictationMode === mode.id ? "mode-row selected" : "mode-row"}
+                  onClick={() => selectMode(mode.id)}
+                >
+                  <div>
+                    <strong>{mode.title}</strong>
+                    <span>{mode.detail}</span>
+                  </div>
+                  <small>{mode.output === "paste" ? "Paste" : "Copy"}</small>
+                </button>
+              ))}
+            </div>
           </section>
         ) : null}
 
         {activeView === "settings" ? (
-          <section className="settings-panel">
-            <label><span>Spoken language</span><select value={language} onChange={(event) => setLanguage(event.currentTarget.value)}><option value="mixed-th-en">Thai + English mixed</option><option value="th">Thai</option><option value="auto">Auto detect</option><option value="en">English</option><option value="ja">Japanese</option><option value="zh">Chinese</option></select></label>
-            <label><span>Output behavior</span><select value={outputMode} onChange={(event) => setOutputMode(event.currentTarget.value as OutputMode)}><option value="paste">Copy and auto-paste</option><option value="copy">Copy to clipboard only</option></select></label>
-            <label className="wide"><span>Model</span><select value={modelPath} onChange={(event) => setModelPath(event.currentTarget.value)}><option value="">Auto select multilingual model</option>{availableModels.map((model) => (<option key={model.path} value={model.path}>{model.name} · {model.multilingual ? "multilingual" : "English only"} · {model.source}</option>))}</select></label>
-            <p className="hint">Thai + English mixed keeps Thai as the base language and preserves English product names or technical terms. Auto-paste may require Accessibility permission.</p>
-          </section>
-        ) : null}
+          <section className="settings-page">
+            <div className="section-header">
+              <h1>Settings</h1>
+              <p>Dictation, engine, and permissions.</p>
+            </div>
 
-        {activeView === "models" || activeView === "sound" ? (
-          <section className="engine-panel">
-            <div className="status-line"><strong>{isChecking ? "Checking..." : whisperStatus?.message}</strong><button type="button" onClick={checkWhisper}>Check again</button></div>
-            <code>whisper: {whisperStatus?.binary_path ?? "not found"}</code>
-            <code>selected model: {modelPath || whisperStatus?.model_path || "auto / not found"}</code>
-            {availableModels.map((model) => (<code key={model.path}>{model.multilingual ? "multi" : "en"}: {model.name} — {model.source}</code>))}
-            <code>ffmpeg: {whisperStatus?.ffmpeg_path ?? "not found"}</code>
-            {whisperStatus?.version ? <small>{whisperStatus.version}</small> : null}
+            <div className="settings-section">
+              <h2>Dictation</h2>
+              <label><span>Language</span><select value={language} onChange={(event) => setLanguage(event.currentTarget.value)}><option value="mixed-th-en">Thai + English mixed</option><option value="th">Thai</option><option value="auto">Auto detect</option><option value="en">English</option><option value="ja">Japanese</option><option value="zh">Chinese</option></select></label>
+              <label><span>Output</span><select value={outputMode} onChange={(event) => setOutputMode(event.currentTarget.value as OutputMode)}><option value="paste">Copy and auto-paste</option><option value="copy">Copy to clipboard only</option></select></label>
+            </div>
+
+            <div className="settings-section">
+              <div className="panel-heading">
+                <h2>Engine</h2>
+                <button type="button" onClick={checkWhisper}>Check</button>
+              </div>
+              <div className={statusReady ? "engine-state ready" : "engine-state"}>{isChecking ? "Checking..." : whisperStatus?.message}</div>
+              <label><span>Model</span><select value={modelPath} onChange={(event) => setModelPath(event.currentTarget.value)}><option value="">Auto select multilingual model</option>{availableModels.map((model) => (<option key={model.path} value={model.path}>{model.name} · {model.multilingual ? "multilingual" : "English only"} · {model.source}</option>))}</select></label>
+            </div>
+
+            <div className="settings-section">
+              <h2>Permissions</h2>
+              <div className="permission-item"><strong>Microphone</strong><span>Required for recording.</span></div>
+              <div className="permission-item"><strong>Accessibility</strong><span>Required for auto-paste.</span></div>
+              <div className="permission-item"><strong>Global shortcut</strong><span>Used by ⌥ Space.</span></div>
+            </div>
           </section>
         ) : null}
 
         {activeView === "history" ? (
-          <section className="history-panel">
-            {history.length === 0 ? <p className="empty">No transcripts yet.</p> : history.map((item, index) => (
-              <button key={`${item}-${index}`} type="button" onClick={() => writeText(item)}>{item}</button>
-            ))}
-          </section>
-        ) : null}
-
-        {activeView === "modes" || activeView === "vocabulary" ? (
-          <section className="placeholder-panel">
-            <h2>{activeView === "modes" ? "Modes are next" : "Vocabulary is next"}</h2>
-            <p>For now the app focuses on the core dictation loop. This section is ready for prompt transforms, custom words, names, and app-specific behavior.</p>
+          <section className="compact-stack">
+            <div className="section-header">
+              <h1>History</h1>
+              <p>Click any item to copy it again.</p>
+            </div>
+            <div className="history-list">
+              {history.length === 0 ? <p className="empty">No transcripts yet.</p> : history.map((item, index) => (
+                <button key={`${item}-${index}`} type="button" onClick={() => writeText(item)}>{item}</button>
+              ))}
+            </div>
           </section>
         ) : null}
       </section>
