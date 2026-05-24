@@ -1,6 +1,6 @@
-# Mahiro Whisper Plan
+# Murmur Plan
 
-Mahiro Whisper is a personal macOS dictation app inspired by Superwhisper. It is built for private daily use, not public distribution first.
+Murmur is a soft personal macOS dictation app inspired by Superwhisper. It is built for private daily use, not public distribution first.
 
 ## Goal
 
@@ -89,4 +89,3 @@ Start pragmatic:
 - Rust backend commands where Tauri integration is natural
 - whisper.cpp as a local binary/sidecar first
 - Keep the daemon boundary simple until latency proves we need a long-running service
-

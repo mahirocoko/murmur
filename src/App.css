@@ -6,17 +6,17 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --background: #191918;
-  --surface: #22211f;
-  --surface-2: #2b2926;
-  --surface-3: #34312d;
+  --background: #191715;
+  --surface: #211e1b;
+  --surface-2: #2a2521;
+  --surface-3: #342d27;
   --border: rgba(255, 255, 255, 0.1);
   --border-strong: rgba(255, 255, 255, 0.16);
   --text: rgba(255, 255, 255, 0.92);
   --muted: rgba(255, 255, 255, 0.6);
   --subtle: rgba(255, 255, 255, 0.42);
-  --accent: #f28a35;
-  --accent-strong: #ff9a48;
+  --accent: #c97845;
+  --accent-strong: #df8d59;
   --danger: #ef5d4f;
   --success: #43d17a;
   --warning: #f6c453;
@@ -71,6 +71,24 @@ p { color: var(--muted); line-height: 1.45; }
   padding: 0 0.68rem;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+}
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-width: 0;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.78rem;
+  font-weight: 720;
+  letter-spacing: -0.01em;
+  pointer-events: none;
+}
+.app-brand img {
+  display: block;
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 5px;
+  object-fit: contain;
 }
 .window-close {
   -webkit-app-region: no-drag;
@@ -344,7 +362,7 @@ p { color: var(--muted); line-height: 1.45; }
   padding: 0.2rem 0.18rem 0.65rem;
   border-bottom: 1px solid var(--border);
 }
-.settings-sidebar-brand svg { width: 1rem; height: 1rem; color: var(--accent-strong); }
+.settings-sidebar-brand img { width: 1.15rem; height: 1.15rem; border-radius: 6px; object-fit: contain; }
 .settings-sidebar-brand strong { display: block; font-size: 0.84rem; }
 .settings-sidebar-brand span { display: block; color: var(--subtle); font-size: 0.72rem; }
 .settings-sidebar-item {

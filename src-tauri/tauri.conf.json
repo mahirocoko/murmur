@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Mahiro Whisper",
+  "productName": "Murmur",
   "version": "0.1.0",
-  "identifier": "app.mahiro.whisper",
+  "identifier": "app.mahiro.murmur",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Mahiro Whisper",
+        "title": "Murmur",
         "width": 360,
         "height": 430,
         "resizable": false,
@@ -31,7 +31,7 @@
       },
       {
         "label": "settings",
-        "title": "Mahiro Whisper Settings",
+        "title": "Murmur Settings",
         "width": 620,
         "height": 560,
         "minWidth": 520,
@@ -51,7 +51,7 @@
       },
       {
         "label": "indicator",
-        "title": "Mahiro Whisper Indicator",
+        "title": "Murmur Indicator",
         "width": 430,
         "height": 124,
         "resizable": false,

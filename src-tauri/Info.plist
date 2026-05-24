@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Mahiro Whisper needs microphone access to record dictation audio and transcribe it locally with whisper.cpp.</string>
+  <string>Murmur needs microphone access to record dictation audio and transcribe it locally with whisper.cpp.</string>
 </dict>
 </plist>

@@ -1,4 +1,4 @@
-# Mahiro Whisper
+# Murmur
 
 Personal macOS dictation app built with Tauri v2 and whisper.cpp.
 

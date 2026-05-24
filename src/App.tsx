@@ -37,7 +37,21 @@ type DictationMode = "quick" | "review" | "transform";
 type SettingsSection = "general" | "history" | "engine" | "permissions";
 type ToolTabId = "settings";
 
-const HISTORY_STORAGE_KEY = "mahiro-whisper-history";
+const APP_NAME = "Murmur";
+const HISTORY_STORAGE_KEY = "murmur-history";
+const LEGACY_HISTORY_STORAGE_KEY = "mahiro-whisper-history";
+const STORAGE_KEYS = {
+  language: "murmur-language",
+  modelPath: "murmur-model-path",
+  outputMode: "murmur-output-mode",
+  mode: "murmur-mode",
+} as const;
+const LEGACY_STORAGE_KEYS = {
+  language: "mahiro-whisper-language",
+  modelPath: "mahiro-whisper-model-path",
+  outputMode: "mahiro-whisper-output-mode",
+  mode: "mahiro-whisper-mode",
+} as const;
 
 interface INativePreferencesPayload {
   language: string;
@@ -63,7 +77,7 @@ const modeOptions: Array<{
     id: "review",
     title: "Review First",
     summary: "Record, transcribe, copy.",
-    detail: "For longer notes where you want the text in Mahiro Whisper before using it elsewhere.",
+    detail: "For longer notes where you want the text in Murmur before using it elsewhere.",
     output: "copy",
   },
   {
@@ -82,11 +96,15 @@ function getSupportedMimeType() {
 
 function readTranscriptHistory() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) ?? "[]");
+    const parsed = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) ?? localStorage.getItem(LEGACY_HISTORY_STORAGE_KEY) ?? "[]");
     return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
   } catch {
     return [];
   }
+}
+
+function readStoredPreference(key: keyof typeof STORAGE_KEYS, fallback = "") {
+  return localStorage.getItem(STORAGE_KEYS[key]) ?? localStorage.getItem(LEGACY_STORAGE_KEYS[key]) ?? fallback;
 }
 
 function prependTranscriptHistory(items: string[], transcript: string) {
@@ -164,9 +182,9 @@ function IndicatorWindow() {
     transcribing: { title: "Transcribing", detail: "Turning speech into text" },
     pasting: { title: "Pasting", detail: "Sending text to the active app" },
     done: { title: "Done", detail: "Transcript copied" },
-    error: { title: "Needs attention", detail: "Open Mahiro Whisper" },
+    error: { title: "Needs attention", detail: `Open ${APP_NAME}` },
   };
-  const copy = indicatorCopy[state] ?? { title: "Working", detail: "Mahiro Whisper" };
+  const copy = indicatorCopy[state] ?? { title: "Working", detail: APP_NAME };
 
   return (
     <main className={`indicator-shell ${state}`}>
@@ -204,13 +222,13 @@ function MainApp() {
   const [transcript, setTranscript] = useState("");
   const [, setHistory] = useState<string[]>(readTranscriptHistory);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [language, setLanguage] = useState(() => localStorage.getItem("mahiro-whisper-language") ?? "mixed-th-en");
-  const [modelPath, setModelPath] = useState(() => localStorage.getItem("mahiro-whisper-model-path") ?? "");
+  const [language, setLanguage] = useState(() => readStoredPreference("language", "mixed-th-en"));
+  const [modelPath, setModelPath] = useState(() => readStoredPreference("modelPath"));
   const [outputMode, setOutputMode] = useState<OutputMode>(() =>
-    localStorage.getItem("mahiro-whisper-output-mode") === "copy" ? "copy" : "paste",
+    readStoredPreference("outputMode") === "copy" ? "copy" : "paste",
   );
   const [dictationMode, setDictationMode] = useState<DictationMode>(() =>
-    (localStorage.getItem("mahiro-whisper-mode") as DictationMode | null) ?? "quick",
+    (readStoredPreference("mode", "quick") as DictationMode | null) ?? "quick",
   );
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -351,11 +369,11 @@ function MainApp() {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("mahiro-whisper-output-mode", outputMode);
+    localStorage.setItem(STORAGE_KEYS.outputMode, outputMode);
   }, [outputMode]);
 
   useEffect(() => {
-    localStorage.setItem("mahiro-whisper-mode", dictationMode);
+    localStorage.setItem(STORAGE_KEYS.mode, dictationMode);
   }, [dictationMode]);
 
   useEffect(() => {
@@ -433,7 +451,7 @@ function MainApp() {
   };
 
   const stateDetail: Record<DictationState, string> = {
-    idle: "Use ⌥ Space from any app. Mahiro Whisper records in the background and returns text to where you were working.",
+    idle: `Use ⌥ Space from any app. ${APP_NAME} records in the background and returns text to where you were working.`,
     "requesting-mic": "Waiting for macOS microphone access.",
     recording: "Speak normally. Press ⌥ Space again when you are done.",
     transcribing: "Audio is being converted locally through whisper.cpp.",
@@ -455,7 +473,7 @@ function MainApp() {
         <button
           type="button"
           className="window-close"
-          aria-label="Close Mahiro Whisper"
+          aria-label={`Close ${APP_NAME}`}
           title="Close"
           data-tauri-drag-region="false"
           onPointerDown={(event) => event.stopPropagation()}
@@ -465,7 +483,11 @@ function MainApp() {
             void invoke("hide_main_window").catch(() => getCurrentWindow().hide());
           }}
         />
-        <nav className="top-tabs" aria-label="Mahiro Whisper sections" data-tauri-drag-region>
+        <div className="app-brand" aria-label={APP_NAME} data-tauri-drag-region>
+          <img src="/murmur-logo-cute-borderless-trimmed.png" alt="" />
+          <span>{APP_NAME}</span>
+        </div>
+        <nav className="top-tabs" aria-label={`${APP_NAME} sections`} data-tauri-drag-region>
           {topTabs.map((item) => {
             const Icon = item.icon;
             return (
@@ -555,11 +577,11 @@ function SettingsWindow() {
   const [whisperStatus, setWhisperStatus] = useState<IWhisperStatus | null>(null);
   const [isChecking, setIsChecking] = useState(true);
   const [history, setHistory] = useState<string[]>(readTranscriptHistory);
-  const [language, setLanguage] = useState(() => localStorage.getItem("mahiro-whisper-language") ?? "mixed-th-en");
-  const [modelPath, setModelPath] = useState(() => localStorage.getItem("mahiro-whisper-model-path") ?? "");
+  const [language, setLanguage] = useState(() => readStoredPreference("language", "mixed-th-en"));
+  const [modelPath, setModelPath] = useState(() => readStoredPreference("modelPath"));
   const [availableModels, setAvailableModels] = useState<IModelInfo[]>([]);
   const [outputMode, setOutputMode] = useState<OutputMode>(() =>
-    localStorage.getItem("mahiro-whisper-output-mode") === "copy" ? "copy" : "paste",
+    readStoredPreference("outputMode") === "copy" ? "copy" : "paste",
   );
 
   useEffect(() => {
@@ -622,15 +644,15 @@ function SettingsWindow() {
   }, [checkWhisper]);
 
   useEffect(() => {
-    localStorage.setItem("mahiro-whisper-language", language);
+    localStorage.setItem(STORAGE_KEYS.language, language);
   }, [language]);
 
   useEffect(() => {
-    localStorage.setItem("mahiro-whisper-model-path", modelPath);
+    localStorage.setItem(STORAGE_KEYS.modelPath, modelPath);
   }, [modelPath]);
 
   useEffect(() => {
-    localStorage.setItem("mahiro-whisper-output-mode", outputMode);
+    localStorage.setItem(STORAGE_KEYS.outputMode, outputMode);
   }, [outputMode]);
 
   useEffect(() => {
@@ -670,16 +692,16 @@ function SettingsWindow() {
         />
         <div>
           <strong>Settings</strong>
-          <span>Mahiro Whisper</span>
+          <span>{APP_NAME}</span>
         </div>
       </header>
 
       <section className="settings-window-body">
         <aside className="settings-sidebar">
           <div className="settings-sidebar-brand">
-            <IconSettings aria-hidden="true" />
+            <img src="/murmur-logo-cute-borderless-trimmed.png" alt="" />
             <div>
-              <strong>Settings</strong>
+              <strong>{APP_NAME}</strong>
               <span>Dictation setup</span>
             </div>
           </div>
@@ -692,7 +714,7 @@ function SettingsWindow() {
         <section className="settings-main-panel">
           <div className="settings-window-heading">
             <h1>{activeSection === "general" ? "General Settings" : activeSection === "history" ? "History" : activeSection === "engine" ? "Engine" : "Permissions"}</h1>
-            <p>{activeSection === "general" ? "Configure dictation behavior and output defaults." : activeSection === "history" ? "Review and copy recent transcripts." : activeSection === "engine" ? "Check local whisper.cpp and model detection." : "System permissions used by Mahiro Whisper."}</p>
+            <p>{activeSection === "general" ? "Configure dictation behavior and output defaults." : activeSection === "history" ? "Review and copy recent transcripts." : activeSection === "engine" ? "Check local whisper.cpp and model detection." : `System permissions used by ${APP_NAME}.`}</p>
           </div>
 
           {activeSection === "general" ? <div id="dictation" className="settings-section">

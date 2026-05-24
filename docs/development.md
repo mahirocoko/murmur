@@ -73,7 +73,7 @@ Manual pipeline smoke test also passed with `say` → `ffmpeg` → `whisper-cli`
 
 `Option + Space` is intentionally seamless: it toggles native Rust/CoreAudio recording directly without opening the main control window, so the previously focused app keeps focus. While recording/transcribing, a small always-on-top non-focusable indicator window appears near the top center with an equalizer-style wave. When transcription finishes, the app copies the transcript and auto-pastes by default.
 
-If auto-paste does nothing, grant Accessibility permission to Mahiro Whisper in macOS System Settings.
+If auto-paste does nothing, grant Accessibility permission to Murmur in macOS System Settings.
 
 
 ## Background recording implementation
@@ -83,7 +83,7 @@ The recording loop no longer depends on the main React webview being visible. Gl
 
 ## Tray behavior
 
-Left-clicking the menu bar icon opens the native tray dropdown. It does not open the main app window. Use `Open Control Center` or `Settings...` from the menu when you want the control window.
+Left-clicking the menu bar icon opens the native tray dropdown. It does not open the main app window. Use `Open Main Window` or `Settings...` from the menu when you want the control window.
 
 
 ## Language behavior
@@ -98,7 +98,7 @@ Thai clipboard output uses native Unicode clipboard writing through `arboard`, n
 
 ## Model list
 
-The Control Center now lists discovered `ggml*.bin` models from Superwhisper, `~/.whisper`, and the local `whisper.cpp/models` directory. Non-English modes prefer multilingual models and avoid `.en.bin` unless the user explicitly selects one.
+Murmur lists discovered `ggml*.bin` models from Superwhisper, `~/.whisper`, and the local `whisper.cpp/models` directory. Non-English modes prefer multilingual models and avoid `.en.bin` unless the user explicitly selects one.
 
 Current observed models on this machine:
 - `/Users/mahiro/Library/Application Support/superwhisper/ggml-small.bin`
@@ -110,7 +110,7 @@ Current observed models on this machine:
 
 ## Stop responsiveness
 
-Stopping recording immediately switches the indicator to `Transcribing` before WAV finalization and transcription run. Paste uses session-level CoreGraphics Cmd+V events after a short clipboard-set delay. If paste still fails, reset Accessibility permission for `/Applications/Mahiro Whisper.app`.
+Stopping recording immediately switches the indicator to `Transcribing` before WAV finalization and transcription run. Paste uses session-level CoreGraphics Cmd+V events after a short clipboard-set delay. If paste still fails, reset Accessibility permission for `/Applications/Murmur.app`.
 
 
 ## Indicator states

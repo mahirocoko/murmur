@@ -1,7 +1,7 @@
 [package]
-name = "mahiro-whisper"
+name = "murmur"
 version = "0.1.0"
-description = "Personal macOS dictation app powered by whisper.cpp"
+description = "Soft personal dictation app powered by whisper.cpp"
 authors = ["mahiro"]
 edition = "2021"
 

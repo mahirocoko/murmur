@@ -2161,23 +2161,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mahiro-whisper"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "core-graphics",
- "cpal",
- "hound",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-opener",
-]
-
-[[package]]
 name = "markup5ever"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2259,6 +2242,23 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "murmur"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "core-graphics",
+ "cpal",
+ "hound",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-opener",
 ]
 
 [[package]]
