@@ -556,6 +556,10 @@ fn show_indicator(app: AppHandle, state: String) -> Result<(), String> {
     const INDICATOR_WIDTH: f64 = 430.0;
     const INDICATOR_HEIGHT: f64 = 124.0;
 
+    if let Some(main_window) = app.get_webview_window("main") {
+        let _ = main_window.hide();
+    }
+
     let window = app
         .get_webview_window("indicator")
         .ok_or_else(|| "indicator window not found".to_string())?;
@@ -997,12 +1001,48 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
+fn show_settings_webview(app: &tauri::AppHandle) {
+    if let Some(main_window) = app.get_webview_window("main") {
+        let _ = main_window.hide();
+    }
+
+    if let Some(window) = app.get_webview_window("settings") {
+        let _ = window.set_size(Size::Logical(LogicalSize::new(620.0, 560.0)));
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+#[tauri::command]
+fn show_settings_window(app: AppHandle) -> Result<(), String> {
+    if let Some(main_window) = app.get_webview_window("main") {
+        let _ = main_window.hide();
+    }
+
+    let window = app
+        .get_webview_window("settings")
+        .ok_or_else(|| "settings window not found".to_string())?;
+    let _ = window.set_size(Size::Logical(LogicalSize::new(620.0, 560.0)));
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn hide_main_window(app: AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "main window not found".to_string())?;
     window.hide().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn hide_settings_window(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("settings")
+        .ok_or_else(|| "settings window not found".to_string())?;
+    window.hide().map_err(|error| error.to_string())?;
+    show_main_window(&app);
+    Ok(())
 }
 
 fn setup_global_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
@@ -1045,12 +1085,17 @@ fn emit_tray_action(app: &tauri::AppHandle, action: &str, should_show_window: bo
     let _ = app.emit("tray-action", action);
 }
 
+fn emit_settings_action(app: &tauri::AppHandle, action: &str) {
+    show_settings_webview(app);
+    let _ = app.emit("settings-action", action);
+}
+
 fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     let toggle = MenuItem::with_id(app, "toggle", "Toggle Recording", true, Some("Alt+Space"))?;
     let settings = MenuItem::with_id(app, "settings", "Settings...", true, Some("Cmd+,"))?;
     let history = MenuItem::with_id(app, "history", "History...", true, None::<&str>)?;
     let status = MenuItem::with_id(app, "status", "Check whisper.cpp", true, None::<&str>)?;
-    let show = MenuItem::with_id(app, "show", "Open Control Center", true, None::<&str>)?;
+    let show = MenuItem::with_id(app, "show", "Open Main Window", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, Some("Cmd+Q"))?;
     let separator_one = PredefinedMenuItem::separator(app)?;
     let separator_two = PredefinedMenuItem::separator(app)?;
@@ -1084,9 +1129,9 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
             "toggle" => {
                 let _ = toggle_native_recording(app.clone());
             }
-            "settings" => emit_tray_action(app, "settings", true),
-            "history" => emit_tray_action(app, "history", true),
-            "status" => emit_tray_action(app, "status", true),
+            "settings" => emit_settings_action(app, "settings"),
+            "history" => emit_settings_action(app, "history"),
+            "status" => emit_settings_action(app, "status"),
             "show" => emit_tray_action(app, "home", true),
             "quit" => app.exit(0),
             _ => {}
@@ -1116,6 +1161,9 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                if window.label() == "settings" {
+                    show_main_window(&window.app_handle());
+                }
             }
         })
         .setup(|app| {
@@ -1134,8 +1182,10 @@ pub fn run() {
             list_available_models,
             hide_indicator,
             hide_main_window,
+            hide_settings_window,
             paste_clipboard,
             show_indicator,
+            show_settings_window,
             set_native_preferences,
             toggle_native_recording,
             cancel_native_recording,
