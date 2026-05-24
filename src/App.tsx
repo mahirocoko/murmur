@@ -77,7 +77,7 @@ function getSupportedMimeType() {
 function IndicatorWindow() {
   const [state, setState] = useState("recording");
   const [audioLevel, setAudioLevel] = useState(0);
-  const [waveTick, setWaveTick] = useState(0);
+  const [waveBars, setWaveBars] = useState(() => Array.from({ length: 78 }, () => 0));
 
   useEffect(() => {
     document.documentElement.dataset.window = "indicator";
@@ -93,6 +93,22 @@ function IndicatorWindow() {
         return currentLevel * 0.8 + nextLevel * 0.2;
       });
     });
+    const unlistenAudioWaveform = listen<number[]>("audio-waveform", (event) => {
+      if (!Array.isArray(event.payload)) return;
+
+      setWaveBars((currentBars) => {
+        const nextBars = event.payload.map((value) => (Number.isFinite(value) ? Math.max(0, Math.min(value, 1)) : 0));
+        if (!nextBars.length) return currentBars;
+
+        return Array.from({ length: 78 }, (_, index) => {
+          const targetIndex = Math.round((index / 77) * (nextBars.length - 1));
+          const target = nextBars[targetIndex] ?? 0;
+          const current = currentBars[index] ?? 0;
+
+          return target > current ? current * 0.18 + target * 0.82 : current * 0.78 + target * 0.22;
+        });
+      });
+    });
 
     return () => {
       delete document.documentElement.dataset.window;
@@ -100,46 +116,27 @@ function IndicatorWindow() {
       void unlistenIndicator.then((dispose) => dispose());
       void unlistenDictation.then((dispose) => dispose());
       void unlistenAudioLevel.then((dispose) => dispose());
+      void unlistenAudioWaveform.then((dispose) => dispose());
     };
   }, []);
 
-
   useEffect(() => {
-    if (state !== "recording") return;
-
-    let frame = 0;
-    let last = 0;
-    const animate = (now: number) => {
-      if (now - last > 70) {
-        last = now;
-        setWaveTick((tick) => tick + 1);
-      }
-      frame = requestAnimationFrame(animate);
-    };
-
-    frame = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(frame);
+    if (state === "recording") return;
+    setWaveBars(Array.from({ length: 78 }, () => 0));
   }, [state]);
 
   const waveHeights = useMemo(() => {
-    const level = state === "recording" ? Math.max(0.1, Math.sqrt(audioLevel) * 1.35) : 0;
-    const now = waveTick * 0.55;
+    const level = state === "recording" ? Math.max(0.08, Math.sqrt(audioLevel)) : 0;
     const floor = 3;
     const max = 54;
 
-    return Array.from({ length: 78 }, (_, index) => {
-      const position = index / 77;
-      const center = 1 - Math.min(1, Math.abs(position - 0.45) * 2.25);
-      const secondLobe = Math.max(0, 1 - Math.abs(position - 0.68) * 8);
-      const leftLobe = Math.max(0, 1 - Math.abs(position - 0.24) * 7);
-      const envelope = Math.max(0.06, center * 0.92 + secondLobe * 0.52 + leftLobe * 0.46);
-      const ripple = 0.72 + Math.sin(now + index * 0.38) * 0.18 + Math.cos(now * 0.52 + index * 0.21) * 0.1;
-      const breath = 0.75 + Math.sin(now * 0.72 + index * 0.17) * 0.25;
-      const height = floor + level * max * envelope * ripple * breath;
+    return waveBars.map((bar) => {
+      const voice = Math.max(bar, level * 0.18);
+      const height = floor + Math.pow(voice, 0.72) * max;
 
       return Math.max(floor, Math.min(max, height));
     });
-  }, [audioLevel, state, waveTick]);
+  }, [audioLevel, state, waveBars]);
 
   const indicatorCopy: Record<string, { title: string; detail: string }> = {
     recording: { title: "Listening", detail: "Press ⌥ Space to stop" },

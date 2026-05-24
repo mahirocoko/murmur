@@ -50,6 +50,7 @@ struct TranscriptionResult {
 
 type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
 type AudioLevelThrottle = Arc<Mutex<u128>>;
+const AUDIO_WAVEFORM_BARS: usize = 78;
 
 struct NativeRecording {
     wav_path: PathBuf,
@@ -103,7 +104,9 @@ fn command_available(candidate: &str, arg: &str) -> bool {
     Command::new(candidate)
         .arg(arg)
         .output()
-        .map(|output| output.status.success() || !output.stdout.is_empty() || !output.stderr.is_empty())
+        .map(|output| {
+            output.status.success() || !output.stdout.is_empty() || !output.stderr.is_empty()
+        })
         .unwrap_or(false)
 }
 
@@ -147,15 +150,17 @@ fn model_candidates() -> Vec<String> {
     }
 
     if let Some(home) = home_dir() {
-        candidates.extend([
-            home.join("Library/Application Support/superwhisper/ggml-small.bin"),
-            home.join("Library/Application Support/superwhisper/ggml-medium.en.bin"),
-            home.join(".whisper/ggml-base.en.bin"),
-            home.join("ghq/github.com/ggml-org/whisper.cpp/models/ggml-small.bin"),
-            home.join("ghq/github.com/ggml-org/whisper.cpp/models/ggml-base.bin"),
-        ]
-        .into_iter()
-        .map(|path| path.to_string_lossy().to_string()));
+        candidates.extend(
+            [
+                home.join("Library/Application Support/superwhisper/ggml-small.bin"),
+                home.join("Library/Application Support/superwhisper/ggml-medium.en.bin"),
+                home.join(".whisper/ggml-base.en.bin"),
+                home.join("ghq/github.com/ggml-org/whisper.cpp/models/ggml-small.bin"),
+                home.join("ghq/github.com/ggml-org/whisper.cpp/models/ggml-base.bin"),
+            ]
+            .into_iter()
+            .map(|path| path.to_string_lossy().to_string()),
+        );
     }
 
     candidates
@@ -177,9 +182,15 @@ fn model_search_dirs() -> Vec<(String, PathBuf)> {
     let mut dirs = Vec::new();
     if let Some(home) = home_dir() {
         dirs.extend([
-            ("Superwhisper".to_string(), home.join("Library/Application Support/superwhisper")),
+            (
+                "Superwhisper".to_string(),
+                home.join("Library/Application Support/superwhisper"),
+            ),
             ("~/.whisper".to_string(), home.join(".whisper")),
-            ("whisper.cpp".to_string(), home.join("ghq/github.com/ggml-org/whisper.cpp/models")),
+            (
+                "whisper.cpp".to_string(),
+                home.join("ghq/github.com/ggml-org/whisper.cpp/models"),
+            ),
         ]);
     }
     dirs
@@ -205,10 +216,17 @@ fn discover_models() -> Vec<ModelInfo> {
     }
 
     for (source, dir) in model_search_dirs() {
-        let Ok(entries) = fs::read_dir(&dir) else { continue; };
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
-            let Some(file_name) = path.file_name().map(|name| name.to_string_lossy().to_string()) else { continue; };
+            let Some(file_name) = path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+            else {
+                continue;
+            };
             if !file_name.starts_with("ggml") || !file_name.ends_with(".bin") {
                 continue;
             }
@@ -257,7 +275,9 @@ fn find_model_path_for_language(preferred: Option<String>, language: &str) -> Op
         }
     }
 
-    candidates.into_iter().find(|candidate| path_exists(candidate))
+    candidates
+        .into_iter()
+        .find(|candidate| path_exists(candidate))
 }
 
 fn probe_whisper(candidate: &str) -> Option<String> {
@@ -303,7 +323,7 @@ fn clean_transcript(text: &str) -> String {
 fn wav_spec_from_config(config: &cpal::SupportedStreamConfig) -> hound::WavSpec {
     hound::WavSpec {
         channels: config.channels(),
-        sample_rate: config.sample_rate().0,
+        sample_rate: config.sample_rate(),
         bits_per_sample: (config.sample_format().sample_size() * 8) as u16,
         sample_format: if config.sample_format().is_float() {
             hound::SampleFormat::Float
@@ -313,7 +333,7 @@ fn wav_spec_from_config(config: &cpal::SupportedStreamConfig) -> hound::WavSpec 
     }
 }
 
-fn emit_audio_level<T>(input: &[T], app: &AppHandle, last_emit: &AudioLevelThrottle)
+fn emit_audio_analysis<T>(input: &[T], app: &AppHandle, last_emit: &AudioLevelThrottle)
 where
     T: Sample,
     f32: FromSample<T>,
@@ -334,22 +354,56 @@ where
         return;
     }
 
-    let sum = input.iter().fold(0.0_f32, |acc, &sample| {
-        let sample = f32::from_sample(sample).clamp(-1.0, 1.0);
-        acc + sample * sample
-    });
+    let mut waveform = vec![0.0_f32; AUDIO_WAVEFORM_BARS];
+    let chunk_size = (input.len() / AUDIO_WAVEFORM_BARS).max(1);
+    let mut total_sum = 0.0_f32;
+
+    for (index, chunk) in input
+        .chunks(chunk_size)
+        .take(AUDIO_WAVEFORM_BARS)
+        .enumerate()
+    {
+        if chunk.is_empty() {
+            continue;
+        }
+
+        let sum = chunk.iter().fold(0.0_f32, |acc, &sample| {
+            let sample = f32::from_sample(sample).clamp(-1.0, 1.0);
+            acc + sample * sample
+        });
+        total_sum += sum;
+
+        // Use RMS per bucket so the indicator follows the real microphone input,
+        // then apply a mild gain/compression curve to make normal speech visible.
+        let rms = (sum / chunk.len() as f32).sqrt();
+        waveform[index] = (rms * 10.0).clamp(0.0, 1.0).sqrt();
+    }
+
+    let sum = if input.len() > AUDIO_WAVEFORM_BARS * chunk_size {
+        input.iter().fold(0.0_f32, |acc, &sample| {
+            let sample = f32::from_sample(sample).clamp(-1.0, 1.0);
+            acc + sample * sample
+        })
+    } else {
+        total_sum
+    };
     let rms = (sum / input.len() as f32).sqrt();
     let level = (rms * 8.0).clamp(0.0, 1.0);
     let _ = app.emit("audio-level", level);
+    let _ = app.emit("audio-waveform", waveform);
 }
 
-fn write_input_data<T, U>(input: &[T], writer: &WavWriterHandle, app: &AppHandle, last_emit: &AudioLevelThrottle)
-where
+fn write_input_data<T, U>(
+    input: &[T],
+    writer: &WavWriterHandle,
+    app: &AppHandle,
+    last_emit: &AudioLevelThrottle,
+) where
     T: Sample,
     U: Sample + hound::Sample + FromSample<T>,
     f32: FromSample<T>,
 {
-    emit_audio_level(input, app, last_emit);
+    emit_audio_analysis(input, app, last_emit);
 
     if let Ok(mut guard) = writer.try_lock() {
         if let Some(writer) = guard.as_mut() {
@@ -365,8 +419,8 @@ fn set_clipboard_text(text: &str) -> Result<(), String> {
     // Use a native Unicode clipboard writer instead of `pbcopy`.
     // `pbcopy` can inherit a non-UTF-8 locale from the app process and turn Thai
     // into mojibake such as `‡πÇ...`.
-    let mut clipboard = arboard::Clipboard::new()
-        .map_err(|error| format!("เปิด clipboard ไม่สำเร็จ: {error}"))?;
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|error| format!("เปิด clipboard ไม่สำเร็จ: {error}"))?;
     clipboard
         .set_text(text.to_string())
         .map_err(|error| format!("เขียน clipboard ไม่สำเร็จ: {error}"))
@@ -387,7 +441,11 @@ fn language_prompt(language: &str) -> Option<&'static str> {
     }
 }
 
-fn transcribe_wav_file(wav_path: &Path, language: &str, model_path: Option<String>) -> Result<String, String> {
+fn transcribe_wav_file(
+    wav_path: &Path,
+    language: &str,
+    model_path: Option<String>,
+) -> Result<String, String> {
     let whisper_binary = find_whisper_binary().ok_or_else(|| {
         "ยังไม่พบ whisper-cli ตั้งค่า MAHIRO_WHISPER_CLI หรือ install whisper.cpp ก่อน".to_string()
     })?;
@@ -455,15 +513,20 @@ fn get_whisper_status() -> WhisperStatus {
     let whisper_binary = find_whisper_binary();
     let model_path = find_model_path(None);
     let ffmpeg_path = find_ffmpeg_binary();
-    let version = whisper_binary
-        .as_deref()
-        .and_then(probe_whisper);
+    let version = whisper_binary.as_deref().and_then(probe_whisper);
 
     let available = whisper_binary.is_some() && model_path.is_some() && ffmpeg_path.is_some();
     let message = match (&whisper_binary, &model_path, &ffmpeg_path) {
-        (Some(_), Some(_), Some(_)) => "พร้อมใช้งาน: พบ whisper.cpp, model และ ffmpeg แล้ว".to_string(),
-        (None, _, _) => "ยังไม่พบ whisper-cli ตั้งค่า MAHIRO_WHISPER_CLI หรือวาง binary ใน /opt/homebrew/bin".to_string(),
-        (_, None, _) => "ยังไม่พบ whisper model ตั้งค่า MAHIRO_WHISPER_MODEL หรือวาง model ใน ~/.whisper".to_string(),
+        (Some(_), Some(_), Some(_)) => {
+            "พร้อมใช้งาน: พบ whisper.cpp, model และ ffmpeg แล้ว".to_string()
+        }
+        (None, _, _) => {
+            "ยังไม่พบ whisper-cli ตั้งค่า MAHIRO_WHISPER_CLI หรือวาง binary ใน /opt/homebrew/bin"
+                .to_string()
+        }
+        (_, None, _) => {
+            "ยังไม่พบ whisper model ตั้งค่า MAHIRO_WHISPER_MODEL หรือวาง model ใน ~/.whisper".to_string()
+        }
         (_, _, None) => "ยังไม่พบ ffmpeg สำหรับแปลงเสียงจาก browser recorder เป็น wav".to_string(),
     };
 
@@ -505,7 +568,11 @@ fn show_indicator(app: AppHandle, state: String) -> Result<(), String> {
     let monitor = window
         .current_monitor()
         .map_err(|error| error.to_string())?
-        .or_else(|| app.available_monitors().ok().and_then(|mut monitors| monitors.pop()));
+        .or_else(|| {
+            app.available_monitors()
+                .ok()
+                .and_then(|mut monitors| monitors.pop())
+        });
 
     if let Some(monitor) = monitor {
         let scale_factor = monitor.scale_factor();
@@ -576,7 +643,9 @@ fn set_native_preferences(app: AppHandle, preferences: NativePreferences) -> Res
         } else {
             preferences.language
         },
-        model_path: preferences.model_path.filter(|path| !path.trim().is_empty()),
+        model_path: preferences
+            .model_path
+            .filter(|path| !path.trim().is_empty()),
         output_mode: preferences.output_mode,
     };
 
@@ -598,8 +667,8 @@ fn transcribe_audio(
     let whisper_binary = find_whisper_binary().ok_or_else(|| {
         "ยังไม่พบ whisper-cli ตั้งค่า MAHIRO_WHISPER_CLI หรือ install whisper.cpp ก่อน".to_string()
     })?;
-    let ffmpeg_binary = find_ffmpeg_binary()
-        .ok_or_else(|| "ยังไม่พบ ffmpeg สำหรับแปลงไฟล์เสียงเป็น WAV".to_string())?;
+    let ffmpeg_binary =
+        find_ffmpeg_binary().ok_or_else(|| "ยังไม่พบ ffmpeg สำหรับแปลงไฟล์เสียงเป็น WAV".to_string())?;
     let model_path = find_model_path(model_path)
         .ok_or_else(|| "ยังไม่พบ whisper model ตั้งค่า MAHIRO_WHISPER_MODEL ก่อน".to_string())?;
 
@@ -731,7 +800,9 @@ fn start_native_recording(app: &AppHandle) -> Result<(), String> {
             let last_emit = audio_level_throttle.clone();
             device.build_input_stream(
                 &config.clone().into(),
-                move |data, _: &_| write_input_data::<i8, i8>(data, &writer_for_stream, &app, &last_emit),
+                move |data, _: &_| {
+                    write_input_data::<i8, i8>(data, &writer_for_stream, &app, &last_emit)
+                },
                 err_fn,
                 None,
             )
@@ -741,7 +812,9 @@ fn start_native_recording(app: &AppHandle) -> Result<(), String> {
             let last_emit = audio_level_throttle.clone();
             device.build_input_stream(
                 &config.clone().into(),
-                move |data, _: &_| write_input_data::<i16, i16>(data, &writer_for_stream, &app, &last_emit),
+                move |data, _: &_| {
+                    write_input_data::<i16, i16>(data, &writer_for_stream, &app, &last_emit)
+                },
                 err_fn,
                 None,
             )
@@ -751,7 +824,9 @@ fn start_native_recording(app: &AppHandle) -> Result<(), String> {
             let last_emit = audio_level_throttle.clone();
             device.build_input_stream(
                 &config.clone().into(),
-                move |data, _: &_| write_input_data::<i32, i32>(data, &writer_for_stream, &app, &last_emit),
+                move |data, _: &_| {
+                    write_input_data::<i32, i32>(data, &writer_for_stream, &app, &last_emit)
+                },
                 err_fn,
                 None,
             )
@@ -761,12 +836,18 @@ fn start_native_recording(app: &AppHandle) -> Result<(), String> {
             let last_emit = audio_level_throttle.clone();
             device.build_input_stream(
                 &config.clone().into(),
-                move |data, _: &_| write_input_data::<f32, f32>(data, &writer_for_stream, &app, &last_emit),
+                move |data, _: &_| {
+                    write_input_data::<f32, f32>(data, &writer_for_stream, &app, &last_emit)
+                },
                 err_fn,
                 None,
             )
         }
-        sample_format => return Err(format!("microphone sample format ยังไม่รองรับ: {sample_format}")),
+        sample_format => {
+            return Err(format!(
+                "microphone sample format ยังไม่รองรับ: {sample_format}"
+            ))
+        }
     }
     .map_err(|error| format!("เริ่ม audio input stream ไม่สำเร็จ: {error}"))?;
 
@@ -774,15 +855,22 @@ fn start_native_recording(app: &AppHandle) -> Result<(), String> {
         .play()
         .map_err(|error| format!("เปิด microphone stream ไม่สำเร็จ: {error}"))?;
 
-    *recording_guard = Some(NativeRecording { wav_path, stream, writer });
-
+    *recording_guard = Some(NativeRecording {
+        wav_path,
+        stream,
+        writer,
+    });
 
     let _ = app.emit("dictation-state", "recording");
     let _ = show_indicator(app.clone(), "Recording".to_string());
     Ok(())
 }
 
-fn finish_native_recording(recording: NativeRecording, app: AppHandle, preferences: NativePreferences) {
+fn finish_native_recording(
+    recording: NativeRecording,
+    app: AppHandle,
+    preferences: NativePreferences,
+) {
     drop(recording.stream);
     let finalize_result = recording
         .writer
@@ -848,7 +936,9 @@ fn take_native_recording(app: &AppHandle) -> Result<Option<NativeRecording>, Str
 }
 
 fn stop_native_recording(app: AppHandle) -> Result<(), String> {
-    let Some(recording) = take_native_recording(&app)? else { return Ok(()); };
+    let Some(recording) = take_native_recording(&app)? else {
+        return Ok(());
+    };
     let _ = app.emit("dictation-state", "transcribing");
     let _ = show_indicator(app.clone(), "Transcribing".to_string());
 
@@ -868,7 +958,9 @@ fn stop_native_recording(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn cancel_native_recording(app: AppHandle) -> Result<(), String> {
-    let Some(recording) = take_native_recording(&app)? else { return Ok(()); };
+    let Some(recording) = take_native_recording(&app)? else {
+        return Ok(());
+    };
     drop(recording.stream);
     if let Ok(mut guard) = recording.writer.lock() {
         let _ = guard.take();
@@ -890,7 +982,11 @@ fn toggle_native_recording(app: AppHandle) -> Result<(), String> {
         guard.is_some()
     };
 
-    if is_recording { stop_native_recording(app) } else { start_native_recording(&app) }
+    if is_recording {
+        stop_native_recording(app)
+    } else {
+        start_native_recording(&app)
+    }
 }
 
 fn show_main_window(app: &tauri::AppHandle) {
@@ -985,7 +1081,9 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "toggle" => { let _ = toggle_native_recording(app.clone()); },
+            "toggle" => {
+                let _ = toggle_native_recording(app.clone());
+            }
             "settings" => emit_tray_action(app, "settings", true),
             "history" => emit_tray_action(app, "history", true),
             "status" => emit_tray_action(app, "status", true),
