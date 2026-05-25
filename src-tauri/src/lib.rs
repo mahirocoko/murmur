@@ -1153,7 +1153,7 @@ fn toggle_native_recording(app: AppHandle) -> Result<(), String> {
 
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.set_size(Size::Logical(LogicalSize::new(360.0, 430.0)));
+        let _ = window.set_size(Size::Logical(LogicalSize::new(360.0, 350.0)));
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -1165,7 +1165,7 @@ fn show_settings_webview(app: &tauri::AppHandle) {
     }
 
     if let Some(window) = app.get_webview_window("settings") {
-        let _ = window.set_size(Size::Logical(LogicalSize::new(620.0, 560.0)));
+        let _ = window.set_size(Size::Logical(LogicalSize::new(760.0, 560.0)));
         let _ = window.show();
         let _ = window.set_focus();
     }
@@ -1180,7 +1180,7 @@ fn show_settings_window(app: AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("settings")
         .ok_or_else(|| "settings window not found".to_string())?;
-    let _ = window.set_size(Size::Logical(LogicalSize::new(620.0, 560.0)));
+    let _ = window.set_size(Size::Logical(LogicalSize::new(760.0, 560.0)));
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())
 }

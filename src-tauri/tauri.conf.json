@@ -15,7 +15,7 @@
         "label": "main",
         "title": "Murmur",
         "width": 360,
-        "height": 430,
+        "height": 350,
         "resizable": false,
         "visible": true,
         "decorations": false,
@@ -23,7 +23,7 @@
         "backgroundColor": "#00000000",
         "windowEffects": {
           "effects": [
-            "windowBackground"
+            "hudWindow"
           ],
           "state": "followsWindowActiveState",
           "radius": 14
@@ -32,9 +32,9 @@
       {
         "label": "settings",
         "title": "Murmur Settings",
-        "width": 620,
+        "width": 760,
         "height": 560,
-        "minWidth": 520,
+        "minWidth": 680,
         "minHeight": 460,
         "resizable": true,
         "visible": false,
@@ -43,7 +43,7 @@
         "backgroundColor": "#00000000",
         "windowEffects": {
           "effects": [
-            "windowBackground"
+            "hudWindow"
           ],
           "state": "followsWindowActiveState",
           "radius": 16

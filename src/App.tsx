@@ -8,7 +8,13 @@ import IconCheckCircle from "~icons/lucide/check-circle";
 import IconCloud from "~icons/lucide/cloud";
 import IconDownload from "~icons/lucide/download";
 import IconHardDrive from "~icons/lucide/hard-drive";
+import IconHistory from "~icons/lucide/history";
+import IconLibraryBig from "~icons/lucide/library-big";
+import IconPanelLeftClose from "~icons/lucide/panel-left-close";
+import IconPanelLeftOpen from "~icons/lucide/panel-left-open";
 import IconSettings from "~icons/lucide/settings";
+import IconShieldCheck from "~icons/lucide/shield-check";
+import IconSlidersHorizontal from "~icons/lucide/sliders-horizontal";
 import IconTrash2 from "~icons/lucide/trash-2";
 import "./App.css";
 
@@ -59,9 +65,7 @@ interface IModelDownloadProgress {
 
 type DictationState = "idle" | "requesting-mic" | "recording" | "transcribing" | "pasting" | "done" | "error";
 type OutputMode = "copy" | "paste";
-type DictationMode = "quick" | "review" | "transform";
 type SettingsSection = "general" | "history" | "models" | "permissions";
-type ToolTabId = "settings";
 
 const APP_NAME = "Murmur";
 const HISTORY_STORAGE_KEY = "murmur-history";
@@ -70,50 +74,25 @@ const STORAGE_KEYS = {
   language: "murmur-language",
   modelPath: "murmur-model-path",
   outputMode: "murmur-output-mode",
-  mode: "murmur-mode",
 } as const;
 const LEGACY_STORAGE_KEYS = {
   language: "mahiro-whisper-language",
   modelPath: "mahiro-whisper-model-path",
   outputMode: "mahiro-whisper-output-mode",
-  mode: "mahiro-whisper-mode",
 } as const;
+
+const settingsSidebarItems: Array<{ id: SettingsSection; label: string; icon: ComponentType<SVGProps<SVGSVGElement>> }> = [
+  { id: "general", label: "General", icon: IconSlidersHorizontal },
+  { id: "history", label: "History", icon: IconHistory },
+  { id: "models", label: "Models Library", icon: IconLibraryBig },
+  { id: "permissions", label: "Permissions", icon: IconShieldCheck },
+];
 
 interface INativePreferencesPayload {
   language: string;
   model_path: string | null;
   output_mode: OutputMode;
 }
-
-const modeOptions: Array<{
-  id: DictationMode;
-  title: string;
-  summary: string;
-  detail: string;
-  output: OutputMode;
-}> = [
-  {
-    id: "quick",
-    title: "Quick Dictation",
-    summary: "Record, transcribe, paste.",
-    detail: "For daily writing where the focused field should receive the transcript immediately.",
-    output: "paste",
-  },
-  {
-    id: "review",
-    title: "Review First",
-    summary: "Record, transcribe, copy.",
-    detail: "For longer notes where you want the text in Murmur before using it elsewhere.",
-    output: "copy",
-  },
-  {
-    id: "transform",
-    title: "Transform",
-    summary: "Capture now, rewrite later.",
-    detail: "Reserved for cleanup, rewrite, translate, and app-specific prompt transforms.",
-    output: "copy",
-  },
-];
 
 const languageOptions = [
   { value: "mixed-th-en", label: "Thai + English", detail: "ถอดไทยเป็นหลัก และคงคำอังกฤษ/technical terms ไว้" },
@@ -264,7 +243,6 @@ function IndicatorWindow() {
 function MainApp() {
   const [whisperStatus, setWhisperStatus] = useState<IWhisperStatus | null>(null);
   const [dictationState, setDictationState] = useState<DictationState>("idle");
-  const [lastShortcutEvent, setLastShortcutEvent] = useState<string | null>(null);
   const [transcript, setTranscript] = useState("");
   const [, setHistory] = useState<string[]>(readTranscriptHistory);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -272,9 +250,6 @@ function MainApp() {
   const [modelPath, setModelPath] = useState(() => readStoredPreference("modelPath"));
   const [outputMode, setOutputMode] = useState<OutputMode>(() =>
     readStoredPreference("outputMode") === "copy" ? "copy" : "paste",
-  );
-  const [dictationMode, setDictationMode] = useState<DictationMode>(() =>
-    (readStoredPreference("mode", "quick") as DictationMode | null) ?? "quick",
   );
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -290,7 +265,7 @@ function MainApp() {
   useEffect(() => {
     void getCurrentWindow()
       .setEffects({
-        effects: [Effect.WindowBackground],
+        effects: [Effect.HudWindow],
         state: EffectState.FollowsWindowActiveState,
         radius: 14,
       })
@@ -407,20 +382,9 @@ function MainApp() {
     }
   }, []);
 
-  const selectMode = useCallback((mode: DictationMode) => {
-    const option = modeOptions.find((item) => item.id === mode);
-    if (!option) return;
-    setDictationMode(mode);
-    setOutputMode(option.output);
-  }, []);
-
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.outputMode, outputMode);
   }, [outputMode]);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.mode, dictationMode);
-  }, [dictationMode]);
 
   useEffect(() => {
     const preferences: INativePreferencesPayload = {
@@ -438,9 +402,6 @@ function MainApp() {
   useEffect(() => {
     void checkWhisper();
 
-    const unlistenShortcut = listen<string>("dictation-shortcut", (event) => {
-      setLastShortcutEvent(event.payload);
-    });
     const unlistenState = listen<DictationState>("dictation-state", (event) => {
       updateDictationState(event.payload);
     });
@@ -464,7 +425,6 @@ function MainApp() {
     });
 
     return () => {
-      void unlistenShortcut.then((dispose) => dispose());
       void unlistenState.then((dispose) => dispose());
       void unlistenTranscript.then((dispose) => dispose());
       void unlistenError.then((dispose) => dispose());
@@ -497,7 +457,7 @@ function MainApp() {
   };
 
   const stateDetail: Record<DictationState, string> = {
-    idle: `Use ⌥ Space from any app. ${APP_NAME} records in the background and returns text to where you were working.`,
+    idle: `Press ⌥ Space from any app, or record here. Output: ${outputMode === "paste" ? "auto-paste" : "copy only"}.`,
     "requesting-mic": "Waiting for macOS microphone access.",
     recording: "Speak normally. Press ⌥ Space again when you are done.",
     transcribing: "Audio is being converted locally through whisper.cpp.",
@@ -508,10 +468,6 @@ function MainApp() {
 
   const canToggle = dictationState !== "requesting-mic" && dictationState !== "transcribing" && dictationState !== "pasting";
   const primaryLabel = dictationState === "recording" ? "Stop" : dictationState === "done" ? "Record again" : "Record";
-  const topTabs: Array<{ id: ToolTabId; label: string; icon: ComponentType<SVGProps<SVGSVGElement>> }> = [
-    { id: "settings", label: "Settings", icon: IconSettings },
-  ];
-
 
   return (
     <main className="compact-shell">
@@ -534,28 +490,17 @@ function MainApp() {
           <span>{APP_NAME}</span>
         </div>
         <nav className="top-tabs" aria-label={`${APP_NAME} sections`} data-tauri-drag-region>
-          {topTabs.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                data-tauri-drag-region="false"
-                className="top-tab"
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={() => {
-                  if (item.id === "settings") {
-                    void invoke("show_settings_window");
-                    return;
-                  }
-                }}
-                aria-label={item.label}
-                title={item.label}
-              >
-                <span><Icon aria-hidden="true" /></span>
-              </button>
-            );
-          })}
+          <button
+            type="button"
+            data-tauri-drag-region="false"
+            className="top-tab"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => void invoke("show_settings_window")}
+            aria-label="Settings"
+            title="Settings"
+          >
+            <span><IconSettings aria-hidden="true" /></span>
+          </button>
         </nav>
       </header>
 
@@ -580,30 +525,6 @@ function MainApp() {
           </div>
 
           {errorMessage ? <div className="notice error">{errorMessage}</div> : null}
-          {lastShortcutEvent ? <div className="notice">Shortcut and tray are connected.</div> : null}
-
-          <section className="capture-tabs" aria-label="Dictation mode">
-            {modeOptions.map((mode) => (
-              <button
-                key={mode.id}
-                type="button"
-                className={dictationMode === mode.id ? "capture-tab active" : "capture-tab"}
-                onClick={() => selectMode(mode.id)}
-              >
-                <strong>{mode.title.replace(" Dictation", "")}</strong>
-                <span>{mode.output === "paste" ? "Paste" : "Copy"}</span>
-              </button>
-            ))}
-          </section>
-
-          <div className="compact-row">
-            <span>Output</span>
-            <strong>{outputMode === "paste" ? "Auto-paste" : "Copy only"}</strong>
-          </div>
-          <div className="compact-row">
-            <span>Shortcut</span>
-            <strong>⌥ Space</strong>
-          </div>
 
           <section className="transcript-box">
             <div className="panel-heading">
@@ -620,6 +541,7 @@ function MainApp() {
 
 function SettingsWindow() {
   const [activeSection, setActiveSection] = useState<SettingsSection>("general");
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [whisperStatus, setWhisperStatus] = useState<IWhisperStatus | null>(null);
   const [isChecking, setIsChecking] = useState(true);
   const [history, setHistory] = useState<string[]>(readTranscriptHistory);
@@ -640,7 +562,7 @@ function SettingsWindow() {
 
     void getCurrentWindow()
       .setEffects({
-        effects: [Effect.WindowBackground],
+        effects: [Effect.HudWindow],
         state: EffectState.FollowsWindowActiveState,
         radius: 16,
       })
@@ -859,19 +781,37 @@ function SettingsWindow() {
         </div>
       </header>
 
-      <section className="settings-window-body">
+      <section className={isSidebarCollapsed ? "settings-window-body sidebar-collapsed" : "settings-window-body"}>
         <aside className="settings-sidebar">
-          <div className="settings-sidebar-brand">
-            <img src="/murmur-logo-cute-borderless-trimmed.png" alt="" />
-            <div>
-              <strong>{APP_NAME}</strong>
-              <span>Dictation setup</span>
-            </div>
-          </div>
-          <button type="button" className={activeSection === "general" ? "settings-sidebar-item active" : "settings-sidebar-item"} onClick={() => setActiveSection("general")}>General</button>
-          <button type="button" className={activeSection === "history" ? "settings-sidebar-item active" : "settings-sidebar-item"} onClick={() => setActiveSection("history")}>History</button>
-          <button type="button" className={activeSection === "models" ? "settings-sidebar-item active" : "settings-sidebar-item"} onClick={() => setActiveSection("models")}>Models Library</button>
-          <button type="button" className={activeSection === "permissions" ? "settings-sidebar-item active" : "settings-sidebar-item"} onClick={() => setActiveSection("permissions")}>Permissions</button>
+          <button
+            type="button"
+            className="settings-sidebar-toggle"
+            onClick={() => setIsSidebarCollapsed((value) => !value)}
+            aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!isSidebarCollapsed}
+            title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {isSidebarCollapsed ? <IconPanelLeftOpen aria-hidden="true" /> : <IconPanelLeftClose aria-hidden="true" />}
+            <span>{isSidebarCollapsed ? "Expand" : "Collapse"}</span>
+          </button>
+          {settingsSidebarItems.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeSection === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={isActive ? "settings-sidebar-item active" : "settings-sidebar-item"}
+                onClick={() => setActiveSection(item.id)}
+                aria-current={isActive ? "page" : undefined}
+                aria-label={isSidebarCollapsed ? item.label : undefined}
+                title={isSidebarCollapsed ? item.label : undefined}
+              >
+                <Icon aria-hidden="true" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
         </aside>
 
         <section className="settings-main-panel">
