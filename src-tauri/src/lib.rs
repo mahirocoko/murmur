@@ -2,7 +2,7 @@ use std::{
     collections::BTreeSet,
     env,
     fs::{self, File},
-    io::BufWriter,
+    io::{BufWriter, Read, Write},
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex},
@@ -37,6 +37,29 @@ struct ModelInfo {
     path: String,
     multilingual: bool,
     source: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ModelCatalogItem {
+    id: String,
+    name: String,
+    file_name: String,
+    multilingual: bool,
+    size_mb: u32,
+    quality: String,
+    speed: String,
+    url: String,
+    installed_path: Option<String>,
+    installed_source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ModelDownloadProgress {
+    model_id: String,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+    percent: Option<f64>,
+    state: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -83,10 +106,6 @@ impl Default for NativePreferences {
 struct NativeRecorderState {
     recording: Mutex<Option<NativeRecording>>,
     preferences: Mutex<NativePreferences>,
-}
-
-fn home_dir() -> Option<PathBuf> {
-    env::var_os("HOME").map(PathBuf::from)
 }
 
 fn timestamp_ms() -> u128 {
@@ -142,30 +161,6 @@ fn ffmpeg_candidates() -> Vec<String> {
     candidates
 }
 
-fn model_candidates() -> Vec<String> {
-    let mut candidates = Vec::new();
-
-    if let Ok(path) = env::var("MAHIRO_WHISPER_MODEL") {
-        candidates.push(path);
-    }
-
-    if let Some(home) = home_dir() {
-        candidates.extend(
-            [
-                home.join("Library/Application Support/superwhisper/ggml-small.bin"),
-                home.join("Library/Application Support/superwhisper/ggml-medium.en.bin"),
-                home.join(".whisper/ggml-base.en.bin"),
-                home.join("ghq/github.com/ggml-org/whisper.cpp/models/ggml-small.bin"),
-                home.join("ghq/github.com/ggml-org/whisper.cpp/models/ggml-base.bin"),
-            ]
-            .into_iter()
-            .map(|path| path.to_string_lossy().to_string()),
-        );
-    }
-
-    candidates
-}
-
 fn find_whisper_binary() -> Option<String> {
     whisper_candidates()
         .into_iter()
@@ -178,44 +173,11 @@ fn find_ffmpeg_binary() -> Option<String> {
         .find(|candidate| path_exists(candidate) || command_available(candidate, "-version"))
 }
 
-fn model_search_dirs() -> Vec<(String, PathBuf)> {
-    let mut dirs = Vec::new();
-    if let Some(home) = home_dir() {
-        dirs.extend([
-            (
-                "Superwhisper".to_string(),
-                home.join("Library/Application Support/superwhisper"),
-            ),
-            ("~/.whisper".to_string(), home.join(".whisper")),
-            (
-                "whisper.cpp".to_string(),
-                home.join("ghq/github.com/ggml-org/whisper.cpp/models"),
-            ),
-        ]);
-    }
-    dirs
-}
-
-fn discover_models() -> Vec<ModelInfo> {
+fn discover_models(dirs: Vec<(String, PathBuf)>) -> Vec<ModelInfo> {
     let mut seen = BTreeSet::new();
     let mut models = Vec::new();
 
-    for path in model_candidates() {
-        if path_exists(&path) && seen.insert(path.clone()) {
-            let name = Path::new(&path)
-                .file_name()
-                .map(|name| name.to_string_lossy().to_string())
-                .unwrap_or_else(|| path.clone());
-            models.push(ModelInfo {
-                multilingual: !name.ends_with(".en.bin"),
-                name,
-                path,
-                source: "candidate".to_string(),
-            });
-        }
-    }
-
-    for (source, dir) in model_search_dirs() {
+    for (source, dir) in dirs {
         let Ok(entries) = fs::read_dir(&dir) else {
             continue;
         };
@@ -252,32 +214,106 @@ fn discover_models() -> Vec<ModelInfo> {
     models
 }
 
-fn find_model_path(preferred: Option<String>) -> Option<String> {
-    preferred
-        .into_iter()
-        .chain(model_candidates())
-        .find(|candidate| path_exists(candidate))
+fn model_catalog() -> Vec<ModelCatalogItem> {
+    let base_url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+
+    [
+        ("tiny", "Whisper Tiny", "ggml-tiny.bin", true, 75, "Fastest", "Basic"),
+        ("base", "Whisper Base", "ggml-base.bin", true, 142, "Fast", "Good"),
+        ("small", "Whisper Small", "ggml-small.bin", true, 466, "Balanced", "Better"),
+        ("medium", "Whisper Medium", "ggml-medium.bin", true, 1530, "Slower", "Strong"),
+        ("large-v3-turbo", "Whisper Large v3 Turbo", "ggml-large-v3-turbo.bin", true, 1620, "Balanced", "Strong"),
+        ("large-v3-turbo-q5-0", "Whisper Large v3 Turbo Q5", "ggml-large-v3-turbo-q5_0.bin", true, 1080, "Balanced", "Strong"),
+        ("large-v3", "Whisper Large v3", "ggml-large-v3.bin", true, 3100, "Slow", "Best"),
+        ("large-v3-q5-0", "Whisper Large v3 Q5", "ggml-large-v3-q5_0.bin", true, 1810, "Slow", "Best"),
+        ("tiny-en", "Whisper Tiny English", "ggml-tiny.en.bin", false, 75, "Fastest", "English"),
+        ("base-en", "Whisper Base English", "ggml-base.en.bin", false, 142, "Fast", "English"),
+        ("small-en", "Whisper Small English", "ggml-small.en.bin", false, 466, "Balanced", "English"),
+    ]
+    .into_iter()
+    .map(|(id, name, file_name, multilingual, size_mb, speed, quality)| ModelCatalogItem {
+        id: id.to_string(),
+        name: name.to_string(),
+        file_name: file_name.to_string(),
+        multilingual,
+        size_mb,
+        speed: speed.to_string(),
+        quality: quality.to_string(),
+        url: format!("{base_url}/{file_name}"),
+        installed_path: None,
+        installed_source: None,
+    })
+    .collect()
 }
 
-fn find_model_path_for_language(preferred: Option<String>, language: &str) -> Option<String> {
+fn app_models_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|dir| dir.join("models"))
+        .map_err(|error| error.to_string())
+}
+
+fn emit_model_download_progress(
+    app: &AppHandle,
+    model_id: &str,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+    state: &str,
+) {
+    let percent = total_bytes
+        .filter(|total| *total > 0)
+        .map(|total| ((downloaded_bytes as f64 / total as f64) * 100.0).clamp(0.0, 100.0));
+
+    let _ = app.emit(
+        "model-download-progress",
+        ModelDownloadProgress {
+            model_id: model_id.to_string(),
+            downloaded_bytes,
+            total_bytes,
+            percent,
+            state: state.to_string(),
+        },
+    );
+}
+
+fn discover_app_models(app: &AppHandle) -> Result<Vec<ModelInfo>, String> {
+    let app_models = app_models_dir(app)?;
+    Ok(discover_models(vec![("Murmur".to_string(), app_models)]))
+}
+
+fn is_path_in_app_models(app: &AppHandle, path: &str) -> bool {
+    let Ok(app_models) = app_models_dir(app) else {
+        return false;
+    };
+    let Ok(canonical_models_dir) = app_models.canonicalize() else {
+        return false;
+    };
+    let Ok(canonical_path) = Path::new(path).canonicalize() else {
+        return false;
+    };
+    canonical_path.starts_with(canonical_models_dir)
+}
+
+fn find_model_path_for_language(
+    app: &AppHandle,
+    preferred: Option<String>,
+    language: &str,
+) -> Option<String> {
     if let Some(preferred) = preferred.filter(|path| !path.trim().is_empty()) {
-        return path_exists(&preferred).then_some(preferred);
-    }
-
-    let candidates = model_candidates();
-
-    if language != "en" {
-        if let Some(path) = candidates
-            .iter()
-            .find(|candidate| path_exists(candidate) && !candidate.ends_with(".en.bin"))
-        {
-            return Some(path.clone());
+        if path_exists(&preferred) && is_path_in_app_models(app, &preferred) {
+            return Some(preferred);
         }
     }
 
-    candidates
-        .into_iter()
-        .find(|candidate| path_exists(candidate))
+    let candidates = discover_app_models(app).ok()?;
+
+    if language != "en" {
+        if let Some(model) = candidates.iter().find(|model| model.multilingual) {
+            return Some(model.path.clone());
+        }
+    }
+
+    candidates.into_iter().next().map(|model| model.path)
 }
 
 fn probe_whisper(candidate: &str) -> Option<String> {
@@ -442,6 +478,7 @@ fn language_prompt(language: &str) -> Option<&'static str> {
 }
 
 fn transcribe_wav_file(
+    app: &AppHandle,
     wav_path: &Path,
     language: &str,
     model_path: Option<String>,
@@ -450,8 +487,8 @@ fn transcribe_wav_file(
         "ยังไม่พบ whisper-cli ตั้งค่า MAHIRO_WHISPER_CLI หรือ install whisper.cpp ก่อน".to_string()
     })?;
     let effective_language = effective_language(language);
-    let model_path = find_model_path_for_language(model_path, effective_language)
-        .ok_or_else(|| "ยังไม่พบ whisper model ตั้งค่า MAHIRO_WHISPER_MODEL ก่อน".to_string())?;
+    let model_path = find_model_path_for_language(app, model_path, effective_language)
+        .ok_or_else(|| "ยังไม่พบ ggml model ใน Murmur app data ดาวน์โหลดจาก Models Library ก่อน".to_string())?;
 
     let transcript_base = wav_path.with_extension("");
     let transcript_txt_path = transcript_base.with_extension("txt");
@@ -504,29 +541,148 @@ fn transcribe_wav_file(
 }
 
 #[tauri::command]
-fn list_available_models() -> Vec<ModelInfo> {
-    discover_models()
+fn list_available_models(app: AppHandle) -> Result<Vec<ModelInfo>, String> {
+    let app_models = app_models_dir(&app)?;
+    Ok(discover_models(vec![("Murmur".to_string(), app_models)]))
 }
 
 #[tauri::command]
-fn get_whisper_status() -> WhisperStatus {
+fn list_model_catalog(app: AppHandle) -> Result<Vec<ModelCatalogItem>, String> {
+    let app_models = app_models_dir(&app)?;
+    let installed_models = discover_models(vec![("Murmur".to_string(), app_models.clone())]);
+
+    Ok(model_catalog()
+        .into_iter()
+        .map(|mut item| {
+            let target_path = app_models.join(&item.file_name);
+            if target_path.exists() {
+                item.installed_path = Some(target_path.to_string_lossy().to_string());
+                item.installed_source = Some("Murmur".to_string());
+            } else if let Some(model) = installed_models.iter().find(|model| model.name == item.file_name) {
+                item.installed_path = Some(model.path.clone());
+                item.installed_source = Some(model.source.clone());
+            }
+            item
+        })
+        .collect())
+}
+
+#[tauri::command]
+async fn download_model(app: AppHandle, model_id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || download_model_blocking(app, model_id))
+        .await
+        .map_err(|error| format!("download task failed: {error}"))?
+}
+
+fn download_model_blocking(app: AppHandle, model_id: String) -> Result<String, String> {
+    let catalog_item = model_catalog()
+        .into_iter()
+        .find(|item| item.id == model_id)
+        .ok_or_else(|| "ไม่พบ model ที่เลือก".to_string())?;
+    let app_models = app_models_dir(&app)?;
+    fs::create_dir_all(&app_models).map_err(|error| error.to_string())?;
+
+    let target_path = app_models.join(&catalog_item.file_name);
+    if target_path.exists() {
+        return Ok(target_path.to_string_lossy().to_string());
+    }
+
+    let temp_path = target_path.with_extension("bin.download");
+    emit_model_download_progress(&app, &catalog_item.id, 0, None, "starting");
+
+    let mut response = reqwest::blocking::get(&catalog_item.url)
+        .map_err(|error| format!("เริ่มดาวน์โหลด model ไม่สำเร็จ: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("ดาวน์โหลด model ไม่สำเร็จ: {error}"))?;
+    let total_bytes = response.content_length();
+    let mut file = File::create(&temp_path).map_err(|error| error.to_string())?;
+    let mut downloaded_bytes = 0_u64;
+    let mut buffer = [0_u8; 1024 * 128];
+    let mut last_emit = 0_u64;
+
+    loop {
+        let bytes_read = response.read(&mut buffer).map_err(|error| error.to_string())?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        file.write_all(&buffer[..bytes_read])
+            .map_err(|error| error.to_string())?;
+        downloaded_bytes += bytes_read as u64;
+
+        if downloaded_bytes.saturating_sub(last_emit) >= 1024 * 512 {
+            emit_model_download_progress(
+                &app,
+                &catalog_item.id,
+                downloaded_bytes,
+                total_bytes,
+                "downloading",
+            );
+            last_emit = downloaded_bytes;
+        }
+    }
+
+    file.flush().map_err(|error| error.to_string())?;
+    emit_model_download_progress(
+        &app,
+        &catalog_item.id,
+        downloaded_bytes,
+        total_bytes,
+        "finishing",
+    );
+
+    fs::rename(&temp_path, &target_path).map_err(|error| error.to_string())?;
+    emit_model_download_progress(
+        &app,
+        &catalog_item.id,
+        downloaded_bytes,
+        total_bytes,
+        "done",
+    );
+    Ok(target_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn uninstall_model(app: AppHandle, model_id: String) -> Result<(), String> {
+    let catalog_item = model_catalog()
+        .into_iter()
+        .find(|item| item.id == model_id)
+        .ok_or_else(|| "ไม่พบ model ที่เลือก".to_string())?;
+    let app_models = app_models_dir(&app)?;
+    let target_path = app_models.join(&catalog_item.file_name);
+
+    if !target_path.exists() {
+        return Ok(());
+    }
+
+    let canonical_models_dir = app_models.canonicalize().map_err(|error| error.to_string())?;
+    let canonical_target = target_path.canonicalize().map_err(|error| error.to_string())?;
+
+    if !canonical_target.starts_with(&canonical_models_dir) {
+        return Err("ลบได้เฉพาะ model ที่ Murmur ดาวน์โหลดไว้เท่านั้น".to_string());
+    }
+
+    fs::remove_file(canonical_target).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_whisper_status(app: AppHandle) -> WhisperStatus {
     let whisper_binary = find_whisper_binary();
-    let model_path = find_model_path(None);
+    let app_model_candidates = discover_app_models(&app).unwrap_or_default();
+    let model_path = app_model_candidates.first().map(|model| model.path.clone());
     let ffmpeg_path = find_ffmpeg_binary();
     let version = whisper_binary.as_deref().and_then(probe_whisper);
 
     let available = whisper_binary.is_some() && model_path.is_some() && ffmpeg_path.is_some();
     let message = match (&whisper_binary, &model_path, &ffmpeg_path) {
         (Some(_), Some(_), Some(_)) => {
-            "พร้อมใช้งาน: พบ whisper.cpp, model และ ffmpeg แล้ว".to_string()
+            "พร้อมใช้งาน: พบ whisper.cpp, ggml model ใน Murmur app data และ ffmpeg แล้ว".to_string()
         }
         (None, _, _) => {
             "ยังไม่พบ whisper-cli ตั้งค่า MAHIRO_WHISPER_CLI หรือวาง binary ใน /opt/homebrew/bin"
                 .to_string()
         }
-        (_, None, _) => {
-            "ยังไม่พบ whisper model ตั้งค่า MAHIRO_WHISPER_MODEL หรือวาง model ใน ~/.whisper".to_string()
-        }
+        (_, None, _) => "ยังไม่พบ ggml model ใน Murmur app data ดาวน์โหลดจาก Models Library ก่อน".to_string(),
         (_, _, None) => "ยังไม่พบ ffmpeg สำหรับแปลงเสียงจาก browser recorder เป็น wav".to_string(),
     };
 
@@ -673,8 +829,9 @@ fn transcribe_audio(
     })?;
     let ffmpeg_binary =
         find_ffmpeg_binary().ok_or_else(|| "ยังไม่พบ ffmpeg สำหรับแปลงไฟล์เสียงเป็น WAV".to_string())?;
-    let model_path = find_model_path(model_path)
-        .ok_or_else(|| "ยังไม่พบ whisper model ตั้งค่า MAHIRO_WHISPER_MODEL ก่อน".to_string())?;
+    let effective_language = effective_language(language.as_deref().unwrap_or("auto"));
+    let model_path = find_model_path_for_language(&app, model_path, effective_language)
+        .ok_or_else(|| "ยังไม่พบ ggml model ใน Murmur app data ดาวน์โหลดจาก Models Library ก่อน".to_string())?;
 
     let recordings_dir = app
         .path()
@@ -892,6 +1049,7 @@ fn finish_native_recording(
     let result = finalize_result
         .and_then(|_| {
             transcribe_wav_file(
+                &app,
                 &recording.wav_path,
                 preferences.language.as_str(),
                 preferences.model_path.clone(),
@@ -1180,6 +1338,9 @@ pub fn run() {
             get_whisper_status,
             get_app_plan,
             list_available_models,
+            list_model_catalog,
+            download_model,
+            uninstall_model,
             hide_indicator,
             hide_main_window,
             hide_settings_window,

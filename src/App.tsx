@@ -4,7 +4,12 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { Effect, EffectState, getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ComponentType, SVGProps } from "react";
+import IconCheckCircle from "~icons/lucide/check-circle";
+import IconCloud from "~icons/lucide/cloud";
+import IconDownload from "~icons/lucide/download";
+import IconHardDrive from "~icons/lucide/hard-drive";
 import IconSettings from "~icons/lucide/settings";
+import IconTrash2 from "~icons/lucide/trash-2";
 import "./App.css";
 
 interface IWhisperStatus {
@@ -31,10 +36,31 @@ interface IModelInfo {
   source: string;
 }
 
+interface IModelCatalogItem {
+  id: string;
+  name: string;
+  file_name: string;
+  multilingual: boolean;
+  size_mb: number;
+  quality: string;
+  speed: string;
+  url: string;
+  installed_path: string | null;
+  installed_source: string | null;
+}
+
+interface IModelDownloadProgress {
+  model_id: string;
+  downloaded_bytes: number;
+  total_bytes: number | null;
+  percent: number | null;
+  state: string;
+}
+
 type DictationState = "idle" | "requesting-mic" | "recording" | "transcribing" | "pasting" | "done" | "error";
 type OutputMode = "copy" | "paste";
 type DictationMode = "quick" | "review" | "transform";
-type SettingsSection = "general" | "history" | "engine" | "permissions";
+type SettingsSection = "general" | "history" | "models" | "permissions";
 type ToolTabId = "settings";
 
 const APP_NAME = "Murmur";
@@ -89,6 +115,20 @@ const modeOptions: Array<{
   },
 ];
 
+const languageOptions = [
+  { value: "mixed-th-en", label: "Thai + English", detail: "ถอดไทยเป็นหลัก และคงคำอังกฤษ/technical terms ไว้" },
+  { value: "th", label: "Thai", detail: "บังคับใช้ภาษาไทย" },
+  { value: "auto", label: "Auto detect", detail: "ให้ whisper.cpp ตรวจภาษาเอง" },
+  { value: "en", label: "English", detail: "สำหรับงานอังกฤษ หรือ model ตระกูล .en" },
+  { value: "ja", label: "Japanese", detail: "สำหรับงานภาษาญี่ปุ่น" },
+  { value: "zh", label: "Chinese", detail: "สำหรับงานภาษาจีน" },
+];
+
+const outputOptions: Array<{ value: OutputMode; label: string; detail: string }> = [
+  { value: "paste", label: "Copy and auto-paste", detail: "คัดลอก transcript แล้ววางกลับไปยังแอปเดิม" },
+  { value: "copy", label: "Copy only", detail: "เก็บไว้ใน clipboard ก่อน แล้วค่อยวางเอง" },
+];
+
 function getSupportedMimeType() {
   const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
   return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) ?? "";
@@ -111,6 +151,12 @@ function prependTranscriptHistory(items: string[], transcript: string) {
   const nextItems = [transcript, ...items].slice(0, 20);
   localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(nextItems));
   return nextItems;
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }
 
 function IndicatorWindow() {
@@ -457,7 +503,7 @@ function MainApp() {
     transcribing: "Audio is being converted locally through whisper.cpp.",
     pasting: "The transcript is on the clipboard and is being sent to the active app.",
     done: outputMode === "paste" ? "Transcript was copied and pasted." : "Transcript was copied to the clipboard.",
-    error: "Check permissions, model path, or the local whisper.cpp engine.",
+    error: "Check permissions, selected model, or local whisper.cpp setup.",
   };
 
   const canToggle = dictationState !== "requesting-mic" && dictationState !== "transcribing" && dictationState !== "pasting";
@@ -580,6 +626,10 @@ function SettingsWindow() {
   const [language, setLanguage] = useState(() => readStoredPreference("language", "mixed-th-en"));
   const [modelPath, setModelPath] = useState(() => readStoredPreference("modelPath"));
   const [availableModels, setAvailableModels] = useState<IModelInfo[]>([]);
+  const [modelCatalog, setModelCatalog] = useState<IModelCatalogItem[]>([]);
+  const [downloadingModelId, setDownloadingModelId] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<Record<string, IModelDownloadProgress>>({});
+  const [uninstallingModelId, setUninstallingModelId] = useState<string | null>(null);
   const [outputMode, setOutputMode] = useState<OutputMode>(() =>
     readStoredPreference("outputMode") === "copy" ? "copy" : "paste",
   );
@@ -606,12 +656,14 @@ function SettingsWindow() {
     setIsChecking(true);
 
     try {
-      const [status, models] = await Promise.all([
+      const [status, models, catalog] = await Promise.all([
         invoke<IWhisperStatus>("get_whisper_status"),
         invoke<IModelInfo[]>("list_available_models"),
+        invoke<IModelCatalogItem[]>("list_model_catalog"),
       ]);
       setWhisperStatus(status);
       setAvailableModels(models);
+      setModelCatalog(catalog);
     } catch (error) {
       setWhisperStatus({
         available: false,
@@ -626,6 +678,55 @@ function SettingsWindow() {
     }
   }, []);
 
+  const downloadModel = useCallback(async (modelId: string) => {
+    setDownloadingModelId(modelId);
+
+    try {
+      const path = await invoke<string>("download_model", { modelId });
+      setModelPath(path);
+      await checkWhisper();
+    } catch (error) {
+      setWhisperStatus({
+        available: false,
+        binary_path: null,
+        model_path: null,
+        ffmpeg_path: null,
+        version: null,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setDownloadingModelId(null);
+      window.setTimeout(() => {
+        setDownloadProgress((items) => {
+          const nextItems = { ...items };
+          delete nextItems[modelId];
+          return nextItems;
+        });
+      }, 900);
+    }
+  }, [checkWhisper]);
+
+  const uninstallModel = useCallback(async (modelId: string, installedPath: string) => {
+    setUninstallingModelId(modelId);
+
+    try {
+      await invoke("uninstall_model", { modelId });
+      if (modelPath === installedPath) setModelPath("");
+      await checkWhisper();
+    } catch (error) {
+      setWhisperStatus({
+        available: false,
+        binary_path: null,
+        model_path: null,
+        ffmpeg_path: null,
+        version: null,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setUninstallingModelId(null);
+    }
+  }, [checkWhisper, modelPath]);
+
   useEffect(() => {
     void checkWhisper();
 
@@ -636,10 +737,14 @@ function SettingsWindow() {
     const unlistenTranscript = listen<string>("transcript-ready", (event) => {
       setHistory((items) => prependTranscriptHistory(items, event.payload));
     });
+    const unlistenModelDownloadProgress = listen<IModelDownloadProgress>("model-download-progress", (event) => {
+      setDownloadProgress((items) => ({ ...items, [event.payload.model_id]: event.payload }));
+    });
 
     return () => {
       void unlistenSettings.then((dispose) => dispose());
       void unlistenTranscript.then((dispose) => dispose());
+      void unlistenModelDownloadProgress.then((dispose) => dispose());
     };
   }, [checkWhisper]);
 
@@ -650,6 +755,11 @@ function SettingsWindow() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.modelPath, modelPath);
   }, [modelPath]);
+
+  useEffect(() => {
+    if (!modelPath || !availableModels.length) return;
+    if (!availableModels.some((model) => model.path === modelPath)) setModelPath("");
+  }, [availableModels, modelPath]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.outputMode, outputMode);
@@ -673,6 +783,59 @@ function SettingsWindow() {
   }, [language, modelPath, outputMode]);
 
   const statusReady = Boolean(whisperStatus?.available);
+  const multilingualCatalog = modelCatalog.filter((model) => model.multilingual);
+  const englishCatalog = modelCatalog.filter((model) => !model.multilingual);
+  const appDataExtraModels = availableModels.filter((model) => !modelCatalog.some((item) => item.file_name === model.name));
+  const multilingualExtraModels = appDataExtraModels.filter((model) => model.multilingual);
+  const englishExtraModels = appDataExtraModels.filter((model) => !model.multilingual);
+
+  const renderCatalogModel = (model: IModelCatalogItem) => {
+    const installedPath = model.installed_path;
+    const installedSource = model.installed_source;
+    const canUninstall = Boolean(installedPath && installedSource === "Murmur");
+    const isSelected = Boolean(installedPath && modelPath === installedPath);
+    const isDownloading = downloadingModelId === model.id;
+    const isUninstalling = uninstallingModelId === model.id;
+    const progress = downloadProgress[model.id];
+    const percent = progress?.percent ?? null;
+    const progressLabel = progress
+      ? percent !== null
+        ? `${Math.round(percent)}% · ${formatBytes(progress.downloaded_bytes)}`
+        : formatBytes(progress.downloaded_bytes)
+      : null;
+
+    return (
+      <div key={model.id} className={isSelected ? "model-row selected" : "model-row"}>
+        <button type="button" className="model-pick" onClick={() => installedPath ? setModelPath(installedPath) : undefined} disabled={!installedPath}>
+          <span className="model-icon">{installedPath ? <IconHardDrive aria-hidden="true" /> : <IconCloud aria-hidden="true" />}</span>
+          <span className="model-main"><strong>{model.name}</strong><small>{installedPath ?? `${model.file_name} · ${model.multilingual ? "Multilingual" : "English only"} · about ${model.size_mb} MB`}</small></span>
+          <span className="model-meta">{installedPath ? installedSource : `${model.speed} / ${model.quality}`}</span>
+        </button>
+        {canUninstall && installedPath ? (
+          <button type="button" className="model-uninstall" onClick={() => uninstallModel(model.id, installedPath)} disabled={Boolean(uninstallingModelId)}>
+            <IconTrash2 aria-hidden="true" />
+            {isUninstalling ? "Removing" : "Uninstall"}
+          </button>
+        ) : installedPath ? (
+          <span className="model-local-source">App data</span>
+        ) : (
+          <button type="button" className="model-download" onClick={() => downloadModel(model.id)} disabled={Boolean(downloadingModelId)}>
+            <IconDownload aria-hidden="true" />
+            {isDownloading ? progressLabel ?? "Downloading" : "Download"}
+          </button>
+        )}
+        {isDownloading ? <span className="model-progress"><span style={{ width: `${percent ?? 12}%` }} /></span> : null}
+      </div>
+    );
+  };
+
+  const renderExtraModel = (model: IModelInfo) => (
+    <button key={model.path} type="button" className={modelPath === model.path ? "model-row selected" : "model-row"} onClick={() => setModelPath(model.path)}>
+      <span className="model-icon"><IconHardDrive aria-hidden="true" /></span>
+      <span className="model-main"><strong>{model.name}</strong><small>{model.path}</small></span>
+      <span className="model-meta">App data</span>
+    </button>
+  );
 
   return (
     <main className="settings-window-shell">
@@ -707,20 +870,40 @@ function SettingsWindow() {
           </div>
           <button type="button" className={activeSection === "general" ? "settings-sidebar-item active" : "settings-sidebar-item"} onClick={() => setActiveSection("general")}>General</button>
           <button type="button" className={activeSection === "history" ? "settings-sidebar-item active" : "settings-sidebar-item"} onClick={() => setActiveSection("history")}>History</button>
-          <button type="button" className={activeSection === "engine" ? "settings-sidebar-item active" : "settings-sidebar-item"} onClick={() => setActiveSection("engine")}>Engine</button>
+          <button type="button" className={activeSection === "models" ? "settings-sidebar-item active" : "settings-sidebar-item"} onClick={() => setActiveSection("models")}>Models Library</button>
           <button type="button" className={activeSection === "permissions" ? "settings-sidebar-item active" : "settings-sidebar-item"} onClick={() => setActiveSection("permissions")}>Permissions</button>
         </aside>
 
         <section className="settings-main-panel">
           <div className="settings-window-heading">
-            <h1>{activeSection === "general" ? "General Settings" : activeSection === "history" ? "History" : activeSection === "engine" ? "Engine" : "Permissions"}</h1>
-            <p>{activeSection === "general" ? "Configure dictation behavior and output defaults." : activeSection === "history" ? "Review and copy recent transcripts." : activeSection === "engine" ? "Check local whisper.cpp and model detection." : `System permissions used by ${APP_NAME}.`}</p>
+            <h1>{activeSection === "general" ? "General Settings" : activeSection === "history" ? "History" : activeSection === "models" ? "Models Library" : "Permissions"}</h1>
+            <p>{activeSection === "general" ? "Set language and where the transcript goes after recording." : activeSection === "history" ? "Review and copy recent transcripts." : activeSection === "models" ? "Choose a ggml model. Downloads are saved in Murmur app data." : `System permissions used by ${APP_NAME}.`}</p>
           </div>
 
           {activeSection === "general" ? <div id="dictation" className="settings-section">
             <h2>Dictation</h2>
-            <label><span>Language</span><select value={language} onChange={(event) => setLanguage(event.currentTarget.value)}><option value="mixed-th-en">Thai + English mixed</option><option value="th">Thai</option><option value="auto">Auto detect</option><option value="en">English</option><option value="ja">Japanese</option><option value="zh">Chinese</option></select></label>
-            <label><span>Output</span><select value={outputMode} onChange={(event) => setOutputMode(event.currentTarget.value as OutputMode)}><option value="paste">Copy and auto-paste</option><option value="copy">Copy to clipboard only</option></select></label>
+            <div className="choice-group" aria-label="Language">
+              <span className="field-label">Language</span>
+              <div className="choice-grid two-column">
+                {languageOptions.map((option) => (
+                  <button key={option.value} type="button" className={language === option.value ? "choice-card selected" : "choice-card"} onClick={() => setLanguage(option.value)}>
+                    <strong>{option.label}</strong>
+                    <span>{option.detail}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="choice-group" aria-label="Output">
+              <span className="field-label">Output</span>
+              <div className="choice-grid">
+                {outputOptions.map((option) => (
+                  <button key={option.value} type="button" className={outputMode === option.value ? "choice-card selected" : "choice-card"} onClick={() => setOutputMode(option.value)}>
+                    <strong>{option.label}</strong>
+                    <span>{option.detail}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div> : null}
 
           {activeSection === "history" ? <div className="settings-section">
@@ -735,13 +918,25 @@ function SettingsWindow() {
             </div>
           </div> : null}
 
-          {activeSection === "engine" ? <div id="engine" className="settings-section">
+          {activeSection === "models" ? <div id="models" className="settings-section models-library-section">
             <div className="panel-heading">
-              <h2>Engine</h2>
+              <h2>Models Library</h2>
               <button type="button" onClick={checkWhisper}>Check</button>
             </div>
             <div className={statusReady ? "engine-state ready" : "engine-state"}>{isChecking ? "Checking..." : whisperStatus?.message}</div>
-            <label><span>Model</span><select value={modelPath} onChange={(event) => setModelPath(event.currentTarget.value)}><option value="">Auto select multilingual model</option>{availableModels.map((model) => (<option key={model.path} value={model.path}>{model.name} · {model.multilingual ? "multilingual" : "English only"} · {model.source}</option>))}</select></label>
+            <div className="model-list" aria-label="Whisper models">
+              <button type="button" className={modelPath ? "model-row" : "model-row selected"} onClick={() => setModelPath("") }>
+                <span className="model-icon"><IconCheckCircle aria-hidden="true" /></span>
+                <span className="model-main"><strong>Auto select</strong><small>Use the best multilingual ggml model Murmur can find.</small></span>
+                <span className="model-meta">Default</span>
+              </button>
+              <div className="model-group"><span>Multilingual</span></div>
+              {multilingualCatalog.map(renderCatalogModel)}
+              {multilingualExtraModels.map(renderExtraModel)}
+              <div className="model-group"><span>English only</span></div>
+              {englishCatalog.map(renderCatalogModel)}
+              {englishExtraModels.map(renderExtraModel)}
+            </div>
           </div> : null}
 
           {activeSection === "permissions" ? <div id="permissions" className="settings-section">

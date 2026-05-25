@@ -23,3 +23,4 @@ cpal = "0.17.3"
 hound = "3"
 arboard = "3"
 core-graphics = "0.25"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
