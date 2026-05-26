@@ -1153,36 +1153,20 @@ fn toggle_native_recording(app: AppHandle) -> Result<(), String> {
 
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.set_size(Size::Logical(LogicalSize::new(360.0, 350.0)));
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
-}
-
-fn show_settings_webview(app: &tauri::AppHandle) {
-    if let Some(main_window) = app.get_webview_window("main") {
-        let _ = main_window.hide();
-    }
-
-    if let Some(window) = app.get_webview_window("settings") {
-        let _ = window.set_size(Size::Logical(LogicalSize::new(760.0, 560.0)));
+        let _ = window.set_size(Size::Logical(LogicalSize::new(1040.0, 660.0)));
         let _ = window.show();
         let _ = window.set_focus();
     }
 }
 
 #[tauri::command]
-fn show_settings_window(app: AppHandle) -> Result<(), String> {
-    if let Some(main_window) = app.get_webview_window("main") {
-        let _ = main_window.hide();
-    }
-
-    let window = app
-        .get_webview_window("settings")
-        .ok_or_else(|| "settings window not found".to_string())?;
-    let _ = window.set_size(Size::Logical(LogicalSize::new(760.0, 560.0)));
-    window.show().map_err(|error| error.to_string())?;
-    window.set_focus().map_err(|error| error.to_string())
+fn get_input_device_name() -> Result<String, String> {
+    let host = cpal::default_host();
+    let device = host
+        .default_input_device()
+        .ok_or_else(|| "ไม่พบ input microphone device".to_string())?;
+    #[allow(deprecated)]
+    device.name().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1191,16 +1175,6 @@ fn hide_main_window(app: AppHandle) -> Result<(), String> {
         .get_webview_window("main")
         .ok_or_else(|| "main window not found".to_string())?;
     window.hide().map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn hide_settings_window(app: AppHandle) -> Result<(), String> {
-    let window = app
-        .get_webview_window("settings")
-        .ok_or_else(|| "settings window not found".to_string())?;
-    window.hide().map_err(|error| error.to_string())?;
-    show_main_window(&app);
-    Ok(())
 }
 
 fn setup_global_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
@@ -1244,7 +1218,7 @@ fn emit_tray_action(app: &tauri::AppHandle, action: &str, should_show_window: bo
 }
 
 fn emit_settings_action(app: &tauri::AppHandle, action: &str) {
-    show_settings_webview(app);
+    show_main_window(app);
     let _ = app.emit("settings-action", action);
 }
 
@@ -1319,9 +1293,6 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
-                if window.label() == "settings" {
-                    show_main_window(&window.app_handle());
-                }
             }
         })
         .setup(|app| {
@@ -1341,12 +1312,11 @@ pub fn run() {
             list_model_catalog,
             download_model,
             uninstall_model,
+            get_input_device_name,
             hide_indicator,
             hide_main_window,
-            hide_settings_window,
             paste_clipboard,
             show_indicator,
-            show_settings_window,
             set_native_preferences,
             toggle_native_recording,
             cancel_native_recording,

@@ -14,9 +14,11 @@
       {
         "label": "main",
         "title": "Murmur",
-        "width": 360,
-        "height": 350,
-        "resizable": false,
+        "width": 1040,
+        "height": 660,
+        "minWidth": 880,
+        "minHeight": 560,
+        "resizable": true,
         "visible": true,
         "decorations": false,
         "transparent": true,
@@ -25,27 +27,7 @@
           "effects": [
             "hudWindow"
           ],
-          "state": "followsWindowActiveState",
-          "radius": 14
-        }
-      },
-      {
-        "label": "settings",
-        "title": "Murmur Settings",
-        "width": 760,
-        "height": 560,
-        "minWidth": 680,
-        "minHeight": 460,
-        "resizable": true,
-        "visible": false,
-        "decorations": false,
-        "transparent": true,
-        "backgroundColor": "#00000000",
-        "windowEffects": {
-          "effects": [
-            "hudWindow"
-          ],
-          "state": "followsWindowActiveState",
+          "state": "active",
           "radius": 16
         }
       },
