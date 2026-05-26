@@ -5,47 +5,142 @@ import Button from '../components/ui/button.astro';
 import Card from '../components/ui/card.astro';
 import BaseLayout from '../layouts/base-layout.astro';
 
-const features = [
-  { title: 'Local transcription', detail: 'Audio stays on your Mac and is transcribed with whisper.cpp.', icon: Lock },
-  { title: 'Thai + English friendly', detail: 'Built for mixed Thai/English dictation without forcing technical terms to translate.', icon: Languages },
-  { title: 'Shortcut first', detail: 'Press ⌥ Space, speak, and send the text back to the app you were using.', icon: Keyboard },
-  { title: 'Model library', detail: 'Manage local ggml models directly from the app shell.', icon: Download },
+const COPY = {
+  en: {
+    metaTitle: 'Murmur — local-first macOS dictation',
+    metaDescription: 'Murmur is a small macOS dictation app powered by local whisper.cpp transcription.',
+    navFeatures: 'Features',
+    navPrivacy: 'Privacy',
+    navInstall: 'Install',
+    languageLabel: 'Language',
+    badge: 'macOS · whisper.cpp · local-first',
+    heroTitle: 'Dictation that stays on your Mac.',
+    heroBody:
+      'Murmur is a small macOS dictation app for turning speech into text with local Whisper transcription, Thai + English workflow support, and a fast shortcut-driven recording flow.',
+    getStarted: 'Get started',
+    viewSource: 'View source',
+    appStatus: 'Local dictation status',
+    defaultMic: 'Default mic',
+    engineLabel: 'Engine',
+    ready: 'Ready',
+    outputLabel: 'Output',
+    autoPaste: 'Auto-paste',
+    recordTitle: 'Record from anywhere',
+    recordBody: 'Press',
+    recordBodyAfter: ', speak normally, and let Murmur return text to your active app.',
+    featureLocalTitle: 'Local transcription',
+    featureLocalDetail: 'Audio stays on your Mac and is transcribed with whisper.cpp.',
+    featureThaiTitle: 'Thai + English friendly',
+    featureThaiDetail: 'Built for mixed Thai/English dictation without forcing technical terms to translate.',
+    featureShortcutTitle: 'Shortcut first',
+    featureShortcutDetail: 'Press ⌥ Space, speak, and send the text back to the app you were using.',
+    featureModelTitle: 'Model library',
+    featureModelDetail: 'Manage local ggml models directly from the app shell.',
+    privacyTitle: 'Private by default',
+    privacyBody:
+      'Murmur is designed around a local-first transcription loop. The app records on-device, writes a local WAV, runs a local Whisper model, and then copies or pastes the transcript.',
+    privacyBulletAudio: 'Audio is processed locally with whisper.cpp.',
+    privacyBulletHistory: 'Transcript history stays in local app storage.',
+    privacyBulletService: 'No hosted transcription service is required for the core flow.',
+    installTitle: 'Build from source',
+    installBody: 'Murmur is early and personal. For now, the safest path is cloning the repo and running the Tauri app locally.',
+    terminalTitle: 'Terminal',
+    footerLicense: 'MIT Licensed. Built for a local-first dictation workflow.',
+    sourceOnGitHub: 'Source on GitHub',
+  },
+  th: {
+    metaTitle: 'Murmur — dictation บน macOS ที่ถอดเสียงในเครื่อง',
+    metaDescription: 'Murmur เป็นแอป dictation เล็ก ๆ บน macOS สำหรับถอดเสียงด้วย whisper.cpp บนเครื่องคุณเอง',
+    navFeatures: 'ความสามารถ',
+    navPrivacy: 'ความเป็นส่วนตัว',
+    navInstall: 'ติดตั้ง',
+    languageLabel: 'ภาษา',
+    badge: 'macOS · whisper.cpp · local-first',
+    heroTitle: 'พูดแล้วได้ข้อความ โดยเสียงยังอยู่บน Mac ของคุณ',
+    heroBody:
+      'Murmur เป็นแอป dictation เล็ก ๆ สำหรับ macOS กด shortcut แล้วพูด แอปจะถอดเสียงด้วย local Whisper รองรับไทยปนอังกฤษ และส่งข้อความกลับไปยังแอปที่คุณใช้อยู่ได้เร็ว',
+    getStarted: 'เริ่มใช้งาน',
+    viewSource: 'ดู source',
+    appStatus: 'สถานะ dictation บนเครื่อง',
+    defaultMic: 'ไมค์เริ่มต้น',
+    engineLabel: 'Engine',
+    ready: 'พร้อมใช้',
+    outputLabel: 'Output',
+    autoPaste: 'Auto-paste',
+    recordTitle: 'อัดเสียงจากแอปไหนก็ได้',
+    recordBody: 'กด',
+    recordBodyAfter: ' พูดตามปกติ แล้วให้ Murmur ส่งข้อความกลับไปยังแอปที่ใช้อยู่',
+    featureLocalTitle: 'ถอดเสียงบนเครื่อง',
+    featureLocalDetail: 'เสียงอยู่บน Mac ของคุณ แล้วถอดด้วย whisper.cpp ในเครื่อง',
+    featureThaiTitle: 'เหมาะกับไทย + อังกฤษ',
+    featureThaiDetail: 'ทำมาสำหรับงานที่พูดไทยปนอังกฤษ โดยคง product name และ technical terms ไว้ ไม่ฝืนแปลจนเสียความหมาย',
+    featureShortcutTitle: 'เริ่มจาก shortcut',
+    featureShortcutDetail: 'กด ⌥ Space แล้วพูด Murmur จะส่งข้อความกลับไปยังแอปเดิมที่คุณใช้อยู่',
+    featureModelTitle: 'จัดการ model ได้ในแอป',
+    featureModelDetail: 'ดาวน์โหลดและจัดการ ggml models ใน app shell ได้โดยตรง',
+    privacyTitle: 'ส่วนตัวตั้งแต่แรก',
+    privacyBody:
+      'Murmur ทำงานแบบ local-first: อัดเสียงบนเครื่อง เขียนไฟล์ WAV ชั่วคราว รัน Whisper model ในเครื่อง แล้วค่อย copy หรือ paste transcript กลับไป',
+    privacyBulletAudio: 'เสียงประมวลผลบนเครื่องด้วย whisper.cpp',
+    privacyBulletHistory: 'ประวัติ transcript เก็บไว้ใน local app storage',
+    privacyBulletService: 'core flow ไม่ต้องพึ่ง hosted transcription service',
+    installTitle: 'Build จาก source',
+    installBody: 'Murmur ยังเป็น early personal tool ตอนนี้ทางที่ตรงที่สุดคือ clone repo แล้วรัน Tauri app บนเครื่อง',
+    terminalTitle: 'Terminal',
+    footerLicense: 'MIT License. ทำมาเพื่อ workflow dictation แบบ local-first',
+    sourceOnGitHub: 'Source บน GitHub',
+  },
+} as const;
+
+type CopyKey = keyof typeof COPY.en;
+
+const features: Array<{ titleKey: CopyKey; detailKey: CopyKey; icon: typeof Lock }> = [
+  { titleKey: 'featureLocalTitle', detailKey: 'featureLocalDetail', icon: Lock },
+  { titleKey: 'featureThaiTitle', detailKey: 'featureThaiDetail', icon: Languages },
+  { titleKey: 'featureShortcutTitle', detailKey: 'featureShortcutDetail', icon: Keyboard },
+  { titleKey: 'featureModelTitle', detailKey: 'featureModelDetail', icon: Download },
 ];
 ---
-<BaseLayout>
+<BaseLayout title={COPY.en.metaTitle} description={COPY.en.metaDescription} lang="en">
   <main class="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-5 py-5 sm:px-7 lg:px-8">
-    <header class="flex items-center justify-between border-b border-border pb-4">
+    <header class="flex items-center justify-between gap-4 border-b border-border pb-4">
       <a href="#top" class="flex items-center gap-3 text-sm font-semibold text-foreground" aria-label="Murmur home">
         <img src={`${import.meta.env.BASE_URL}murmur-logo-cute-borderless-trimmed.png`} alt="" class="size-8 rounded-md" />
         <span>Murmur</span>
       </a>
-      <nav class="hidden items-center gap-5 text-sm text-muted sm:flex" aria-label="Main navigation">
-        <a class="hover:text-foreground" href="#features">Features</a>
-        <a class="hover:text-foreground" href="#privacy">Privacy</a>
-        <a class="hover:text-foreground" href="#install">Install</a>
+      <nav class="hidden items-center gap-5 text-sm text-muted md:flex" aria-label="Main navigation">
+        <a class="hover:text-foreground" href="#features" data-i18n="navFeatures">{COPY.en.navFeatures}</a>
+        <a class="hover:text-foreground" href="#privacy" data-i18n="navPrivacy">{COPY.en.navPrivacy}</a>
+        <a class="hover:text-foreground" href="#install" data-i18n="navInstall">{COPY.en.navInstall}</a>
       </nav>
-      <Button href="https://github.com/mahirocoko/murmur" target="_blank" variant="secondary" size="sm">
-        <Github class="size-4" />
-        GitHub
-      </Button>
+      <div class="flex items-center gap-2">
+        <div class="language-switch" aria-label={COPY.en.languageLabel}>
+          <button type="button" data-lang-button="th" aria-pressed="false">TH</button>
+          <button type="button" data-lang-button="en" aria-pressed="true">EN</button>
+        </div>
+        <Button href="https://github.com/mahirocoko/murmur" target="_blank" variant="secondary" size="sm">
+          <Github class="size-4" />
+          GitHub
+        </Button>
+      </div>
     </header>
 
     <section id="top" class="grid gap-10 py-16 lg:grid-cols-[1fr_0.86fr] lg:items-center lg:py-20">
       <div class="max-w-2xl">
-        <Badge>macOS · whisper.cpp · local-first</Badge>
-        <h1 class="mt-5 text-4xl font-bold tracking-[-0.035em] text-foreground sm:text-5xl lg:text-6xl">
-          Dictation that stays on your Mac.
+        <Badge><span data-i18n="badge">{COPY.en.badge}</span></Badge>
+        <h1 class="mt-5 text-4xl font-bold tracking-[-0.035em] text-foreground sm:text-5xl lg:text-6xl" data-i18n="heroTitle">
+          {COPY.en.heroTitle}
         </h1>
-        <p class="mt-5 max-w-xl text-base leading-7 text-muted sm:text-lg">
-          Murmur is a small macOS dictation app for turning speech into text with local Whisper transcription, Thai + English workflow support, and a fast shortcut-driven recording flow.
+        <p class="mt-5 max-w-xl text-base leading-7 text-muted sm:text-lg" data-i18n="heroBody">
+          {COPY.en.heroBody}
         </p>
         <div class="mt-7 flex flex-col gap-3 sm:flex-row">
           <Button href="#install" size="lg">
-            Get started
+            <span data-i18n="getStarted">{COPY.en.getStarted}</span>
             <ArrowRight class="size-4" />
           </Button>
           <Button href="https://github.com/mahirocoko/murmur" target="_blank" variant="secondary" size="lg">
-            View source
+            <span data-i18n="viewSource">{COPY.en.viewSource}</span>
           </Button>
         </div>
       </div>
@@ -72,23 +167,23 @@ const features = [
             <div class="flex items-center justify-between gap-4 border-b border-border pb-4">
               <div>
                 <h2 class="text-2xl font-bold tracking-tight">Home</h2>
-                <p class="mt-1 text-sm text-muted">Local dictation status</p>
+                <p class="mt-1 text-sm text-muted" data-i18n="appStatus">{COPY.en.appStatus}</p>
               </div>
-              <span class="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted"><Mic class="size-4" /> Default mic</span>
+              <span class="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted"><Mic class="size-4" /> <span data-i18n="defaultMic">{COPY.en.defaultMic}</span></span>
             </div>
             <div class="mt-6 grid grid-cols-2 gap-3">
               <div class="rounded-lg border border-border bg-[#2a2725] p-4">
-                <p class="text-sm text-muted">Engine</p>
-                <strong class="mt-1 block text-2xl text-[#baf3cd]">Ready</strong>
+                <p class="text-sm text-muted" data-i18n="engineLabel">{COPY.en.engineLabel}</p>
+                <strong class="mt-1 block text-2xl text-[#baf3cd]" data-i18n="ready">{COPY.en.ready}</strong>
               </div>
               <div class="rounded-lg border border-border bg-[#2a2725] p-4">
-                <p class="text-sm text-muted">Output</p>
-                <strong class="mt-1 block text-2xl">Auto-paste</strong>
+                <p class="text-sm text-muted" data-i18n="outputLabel">{COPY.en.outputLabel}</p>
+                <strong class="mt-1 block text-2xl" data-i18n="autoPaste">{COPY.en.autoPaste}</strong>
               </div>
             </div>
             <div class="mt-5 rounded-lg border border-border bg-[#2a2725] p-4">
-              <h3 class="text-lg font-semibold">Record from anywhere</h3>
-              <p class="mt-2 text-sm leading-6 text-muted">Press <kbd class="rounded bg-black/30 px-1.5 py-0.5 text-xs text-foreground">⌥</kbd> <kbd class="rounded bg-black/30 px-1.5 py-0.5 text-xs text-foreground">Space</kbd>, speak normally, and let Murmur return text to your active app.</p>
+              <h3 class="text-lg font-semibold" data-i18n="recordTitle">{COPY.en.recordTitle}</h3>
+              <p class="mt-2 text-sm leading-6 text-muted"><span data-i18n="recordBody">{COPY.en.recordBody}</span> <kbd class="rounded bg-black/30 px-1.5 py-0.5 text-xs text-foreground">⌥</kbd> <kbd class="rounded bg-black/30 px-1.5 py-0.5 text-xs text-foreground">Space</kbd><span data-i18n="recordBodyAfter">{COPY.en.recordBodyAfter}</span></p>
             </div>
             <div class="mt-6 flex h-16 items-center gap-1 overflow-hidden rounded-lg border border-border bg-[#1f1d1c] px-4">
               {Array.from({ length: 54 }).map((_, index) => (
@@ -106,8 +201,8 @@ const features = [
         return (
           <Card class="p-5">
             <Icon class="size-5 text-primary" />
-            <h2 class="mt-4 text-base font-semibold">{feature.title}</h2>
-            <p class="mt-2 text-sm leading-6 text-muted">{feature.detail}</p>
+            <h2 class="mt-4 text-base font-semibold" data-i18n={feature.titleKey}>{COPY.en[feature.titleKey]}</h2>
+            <p class="mt-2 text-sm leading-6 text-muted" data-i18n={feature.detailKey}>{COPY.en[feature.detailKey]}</p>
           </Card>
         );
       })}
@@ -115,25 +210,25 @@ const features = [
 
     <section id="privacy" class="grid gap-5 py-10 lg:grid-cols-[0.7fr_1fr] lg:items-start">
       <div>
-        <h2 class="text-2xl font-bold tracking-tight">Private by default</h2>
-        <p class="mt-3 text-sm leading-6 text-muted">Murmur is designed around a local-first transcription loop. The app records on-device, writes a local WAV, runs a local Whisper model, and then copies or pastes the transcript.</p>
+        <h2 class="text-2xl font-bold tracking-tight" data-i18n="privacyTitle">{COPY.en.privacyTitle}</h2>
+        <p class="mt-3 text-sm leading-6 text-muted" data-i18n="privacyBody">{COPY.en.privacyBody}</p>
       </div>
       <Card class="p-5">
         <ul class="grid gap-3 text-sm text-muted">
-          <li class="flex gap-3"><Lock class="mt-0.5 size-4 text-primary" /> Audio is processed locally with whisper.cpp.</li>
-          <li class="flex gap-3"><Clipboard class="mt-0.5 size-4 text-primary" /> Transcript history stays in local app storage.</li>
-          <li class="flex gap-3"><Bot class="mt-0.5 size-4 text-primary" /> No hosted transcription service is required for the core flow.</li>
+          <li class="flex gap-3"><Lock class="mt-0.5 size-4 text-primary" /> <span data-i18n="privacyBulletAudio">{COPY.en.privacyBulletAudio}</span></li>
+          <li class="flex gap-3"><Clipboard class="mt-0.5 size-4 text-primary" /> <span data-i18n="privacyBulletHistory">{COPY.en.privacyBulletHistory}</span></li>
+          <li class="flex gap-3"><Bot class="mt-0.5 size-4 text-primary" /> <span data-i18n="privacyBulletService">{COPY.en.privacyBulletService}</span></li>
         </ul>
       </Card>
     </section>
 
     <section id="install" class="grid gap-5 py-10 lg:grid-cols-[0.7fr_1fr] lg:items-start">
       <div>
-        <h2 class="text-2xl font-bold tracking-tight">Build from source</h2>
-        <p class="mt-3 text-sm leading-6 text-muted">Murmur is early and personal. For now, the safest path is cloning the repo and running the Tauri app locally.</p>
+        <h2 class="text-2xl font-bold tracking-tight" data-i18n="installTitle">{COPY.en.installTitle}</h2>
+        <p class="mt-3 text-sm leading-6 text-muted" data-i18n="installBody">{COPY.en.installBody}</p>
       </div>
       <Card class="overflow-hidden p-0">
-        <div class="border-b border-border px-4 py-3 text-sm font-semibold">Terminal</div>
+        <div class="border-b border-border px-4 py-3 text-sm font-semibold" data-i18n="terminalTitle">{COPY.en.terminalTitle}</div>
         <pre class="overflow-auto p-4 text-sm leading-7 text-muted"><code>git clone git@github.com:mahirocoko/murmur.git
 cd murmur
 pnpm install
@@ -142,10 +237,72 @@ pnpm tauri dev</code></pre>
     </section>
 
     <footer class="mt-auto flex flex-col gap-3 border-t border-border py-6 text-sm text-muted sm:flex-row sm:items-center sm:justify-between">
-      <span>MIT Licensed. Built for a local-first dictation workflow.</span>
+      <span data-i18n="footerLicense">{COPY.en.footerLicense}</span>
       <a class="inline-flex items-center gap-2 hover:text-foreground" href="https://github.com/mahirocoko/murmur" target="_blank" rel="noreferrer">
-        <Terminal class="size-4" /> Source on GitHub
+        <Terminal class="size-4" /> <span data-i18n="sourceOnGitHub">{COPY.en.sourceOnGitHub}</span>
       </a>
     </footer>
   </main>
+
+  <script is:inline define:vars={{ copy: COPY, storageKey: 'murmur-site-language' }}>
+    const supportedLangs = ['en', 'th'];
+
+    function getStoredLanguage() {
+      try {
+        const value = localStorage.getItem(storageKey);
+        return supportedLangs.includes(value) ? value : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function detectLanguage() {
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (timeZone) return timeZone === 'Asia/Bangkok' ? 'th' : 'en';
+
+      const browserLanguages = navigator.languages?.length ? navigator.languages : [navigator.language];
+      const isThaiLanguage = browserLanguages.some((language) => language?.toLowerCase().startsWith('th'));
+      return isThaiLanguage ? 'th' : 'en';
+    }
+
+    function applyLanguage(language) {
+      const nextLanguage = supportedLangs.includes(language) ? language : 'en';
+      const dictionary = copy[nextLanguage];
+
+      document.documentElement.lang = nextLanguage;
+      document.title = dictionary.metaTitle;
+
+      const description = document.querySelector('meta[name="description"]');
+      const ogTitle = document.querySelector('meta[property="og:title"]');
+      const ogDescription = document.querySelector('meta[property="og:description"]');
+      if (description) description.setAttribute('content', dictionary.metaDescription);
+      if (ogTitle) ogTitle.setAttribute('content', dictionary.metaTitle);
+      if (ogDescription) ogDescription.setAttribute('content', dictionary.metaDescription);
+      document.querySelector('.language-switch')?.setAttribute('aria-label', dictionary.languageLabel);
+
+      document.querySelectorAll('[data-i18n]').forEach((node) => {
+        const key = node.getAttribute('data-i18n');
+        if (key && dictionary[key]) node.textContent = dictionary[key];
+      });
+
+      document.querySelectorAll('[data-lang-button]').forEach((button) => {
+        button.setAttribute('aria-pressed', button.getAttribute('data-lang-button') === nextLanguage ? 'true' : 'false');
+      });
+    }
+
+    function setLanguage(language) {
+      try {
+        localStorage.setItem(storageKey, language);
+      } catch {
+        // Keep the page usable when storage is unavailable.
+      }
+      applyLanguage(language);
+    }
+
+    document.querySelectorAll('[data-lang-button]').forEach((button) => {
+      button.addEventListener('click', () => setLanguage(button.getAttribute('data-lang-button')));
+    });
+
+    applyLanguage(getStoredLanguage() ?? detectLanguage());
+  </script>
 </BaseLayout>

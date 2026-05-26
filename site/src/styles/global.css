@@ -42,6 +42,39 @@ body {
   background: rgba(223, 141, 89, 0.28);
 }
 
-button, a {
+button,
+a {
   -webkit-tap-highlight-color: transparent;
+}
+
+.language-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-secondary);
+  padding: 2px;
+}
+
+.language-switch button {
+  height: 2rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 0 0.55rem;
+  color: var(--color-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.language-switch button:hover {
+  color: var(--color-foreground);
+}
+
+.language-switch button[aria-pressed="true"] {
+  color: var(--color-foreground);
+  background: #3a352f;
 }
