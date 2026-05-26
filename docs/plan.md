@@ -1,91 +1,108 @@
 # Murmur Plan
 
-Murmur is a soft personal macOS dictation app inspired by Superwhisper. It is built for private daily use, not public distribution first.
+Murmur is a soft personal macOS dictation app inspired by Superwhisper's desktop workflow. It is built for private daily use first, then made readable enough for open-source exploration.
 
 ## Goal
 
-Build a local-first macOS menu bar dictation app:
+Build a local-first macOS dictation app:
 
-1. Press a global shortcut to start recording.
-2. Press again to stop.
-3. Send audio to a local whisper.cpp worker/daemon.
-4. Return text to the Tauri app.
-5. Copy the result, auto-paste it, or show an editor before paste.
+1. Press `Option + Space` to start recording from any app.
+2. Press `Option + Space` again to stop.
+3. Record audio locally with CoreAudio/CPAL and write WAV with hound.
+4. Run `whisper-cli` from whisper.cpp locally.
+5. Copy the result, auto-paste it, or review it in local history.
 
 This project is speech-to-text / dictation, not text-to-speech.
 
-## Product Shape
+## Current product shape
 
-- macOS-first Tauri v2 app
-- Menu bar / tray icon / status item as the primary entry point
-- Global shortcut for start/stop dictation
-- Floating recording/transcribing indicator
-- Local history and settings
-- whisper.cpp with Metal support on Apple Silicon where possible
+- macOS-first Tauri v2 app.
+- One main app shell with sidebar sections: Home, General, Models, History, Permissions.
+- Menu bar / tray icon for background use.
+- Global shortcut for start/stop dictation.
+- Floating non-focusable recording/transcribing indicator.
+- Local model library and transcript history.
+- Astro landing page in `site/` deployed through GitHub Pages.
 
-## Architecture
+## Current architecture
 
 ```txt
 Tauri v2 App
-├─ Tray icon / menu bar status item
-├─ Global shortcut
-├─ Floating status/editor window
-├─ Clipboard + optional auto-paste
-├─ Settings + history
-└─ Local IPC/HTTP/WebSocket client
-
-Whisper Worker / Daemon
-├─ Loads whisper.cpp model and keeps it warm
-├─ Owns recording start/stop or accepts recorded files
-├─ Runs transcription
-├─ Reports progress/status
-└─ Returns final transcript
+├─ main window: app shell / settings / history / model library
+├─ indicator window: non-focusable recording pill + rolling waveform
+├─ tray menu / menu bar status item
+├─ global shortcut: Option + Space only
+├─ Rust native recording through CPAL
+├─ WAV writing through hound
+├─ whisper.cpp command execution
+├─ native Unicode clipboard through arboard
+└─ CoreGraphics auto-paste
 ```
+
+There is no standalone Settings window anymore. Settings are integrated into the main shell.
 
 ## Phase 1 — Foundation
 
+Done:
+
 - Scaffold Tauri v2 + TypeScript UI.
 - Add tray icon/menu bar behavior.
-- Add basic window for settings/status.
 - Add global shortcut plugin.
-- Add a minimal sidecar/worker boundary.
 - Confirm local `whisper-cli` / whisper.cpp availability.
+- Add native CPAL recording path.
 
 ## Phase 2 — First usable dictation loop
 
-- Record audio to a temporary WAV file.
+Done:
+
+- Record audio to local WAV.
 - Transcribe through whisper.cpp.
 - Copy transcript to clipboard.
+- Auto-paste via CoreGraphics after Accessibility permission.
 - Show clear error states for missing model, missing permission, timeout, or cancelled transcription.
 
 ## Phase 3 — Daily-use polish
 
-- Auto-paste into the active app after Accessibility permission is granted.
-- Add floating recording pill.
-- Add history.
-- Add edit-before-paste popup.
-- Add launch-at-login setting.
+In progress / partially done:
+
+- Main shell with Home/General/Models/History/Permissions.
+- Model library download/select/uninstall.
+- Floating recording indicator with rolling waveform.
+- Sidebar collapse.
+- Landing page.
+
+Possible next polish:
+
+- Launch-at-login setting.
+- Edit-before-paste flow.
+- Better permission diagnostics.
+- More refined model download progress and failure recovery.
+- Real screenshot/GIF for README and landing page.
 
 ## Phase 4 — Advanced local workflow
 
-- Keep model warm in a daemon/sidecar for lower latency.
+Future ideas:
+
+- Keep model warm in a daemon/sidecar for lower latency if startup cost becomes painful.
 - Add VAD / silence detection.
 - Add streaming partial transcript if practical.
 - Add prompt transforms such as cleanup, translate, summarize, or rewrite tone.
 - Add notch-aware UI only after the dictation loop is stable.
 
-## macOS Permission Notes
+## macOS permission notes
 
 - Microphone permission is required for recording.
 - Accessibility permission is required for automatic paste into the active app.
 - Global shortcut may conflict with existing macOS/app shortcuts.
+- Murmur should not register global Esc; it must not steal Esc from other apps.
 
-## Initial Technical Bias
+## Technical bias
 
-Start pragmatic:
+Keep the app pragmatic:
 
-- Tauri v2 app shell
-- TypeScript frontend
-- Rust backend commands where Tauri integration is natural
-- whisper.cpp as a local binary/sidecar first
-- Keep the daemon boundary simple until latency proves we need a long-running service
+- Tauri v2 app shell.
+- TypeScript frontend.
+- Rust backend commands where Tauri integration is natural.
+- whisper.cpp as a local binary first.
+- Exact package versions in `package.json` files.
+- Separate landing page in `site/`, not mixed into the desktop app UI.
