@@ -26,7 +26,6 @@ struct WhisperStatus {
     available: bool,
     binary_path: Option<String>,
     model_path: Option<String>,
-    ffmpeg_path: Option<String>,
     version: Option<String>,
     message: String,
 }
@@ -60,15 +59,6 @@ struct ModelDownloadProgress {
     total_bytes: Option<u64>,
     percent: Option<f64>,
     state: String,
-}
-
-#[derive(Debug, Serialize)]
-struct TranscriptionResult {
-    transcript: String,
-    raw_audio_path: String,
-    wav_path: String,
-    model_path: String,
-    whisper_binary_path: String,
 }
 
 type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
@@ -145,32 +135,10 @@ fn whisper_candidates() -> Vec<String> {
     candidates
 }
 
-fn ffmpeg_candidates() -> Vec<String> {
-    let mut candidates = Vec::new();
-
-    if let Ok(path) = env::var("MAHIRO_FFMPEG") {
-        candidates.push(path);
-    }
-
-    candidates.extend([
-        "/opt/homebrew/bin/ffmpeg".to_string(),
-        "/usr/local/bin/ffmpeg".to_string(),
-        "ffmpeg".to_string(),
-    ]);
-
-    candidates
-}
-
 fn find_whisper_binary() -> Option<String> {
     whisper_candidates()
         .into_iter()
         .find(|candidate| path_exists(candidate) || command_available(candidate, "--help"))
-}
-
-fn find_ffmpeg_binary() -> Option<String> {
-    ffmpeg_candidates()
-        .into_iter()
-        .find(|candidate| path_exists(candidate) || command_available(candidate, "-version"))
 }
 
 fn discover_models(dirs: Vec<(String, PathBuf)>) -> Vec<ModelInfo> {
@@ -218,31 +186,121 @@ fn model_catalog() -> Vec<ModelCatalogItem> {
     let base_url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
     [
-        ("tiny", "Whisper Tiny", "ggml-tiny.bin", true, 75, "Fastest", "Basic"),
-        ("base", "Whisper Base", "ggml-base.bin", true, 142, "Fast", "Good"),
-        ("small", "Whisper Small", "ggml-small.bin", true, 466, "Balanced", "Better"),
-        ("medium", "Whisper Medium", "ggml-medium.bin", true, 1530, "Slower", "Strong"),
-        ("large-v3-turbo", "Whisper Large v3 Turbo", "ggml-large-v3-turbo.bin", true, 1620, "Balanced", "Strong"),
-        ("large-v3-turbo-q5-0", "Whisper Large v3 Turbo Q5", "ggml-large-v3-turbo-q5_0.bin", true, 1080, "Balanced", "Strong"),
-        ("large-v3", "Whisper Large v3", "ggml-large-v3.bin", true, 3100, "Slow", "Best"),
-        ("large-v3-q5-0", "Whisper Large v3 Q5", "ggml-large-v3-q5_0.bin", true, 1810, "Slow", "Best"),
-        ("tiny-en", "Whisper Tiny English", "ggml-tiny.en.bin", false, 75, "Fastest", "English"),
-        ("base-en", "Whisper Base English", "ggml-base.en.bin", false, 142, "Fast", "English"),
-        ("small-en", "Whisper Small English", "ggml-small.en.bin", false, 466, "Balanced", "English"),
+        (
+            "tiny",
+            "Whisper Tiny",
+            "ggml-tiny.bin",
+            true,
+            75,
+            "Fastest",
+            "Basic",
+        ),
+        (
+            "base",
+            "Whisper Base",
+            "ggml-base.bin",
+            true,
+            142,
+            "Fast",
+            "Good",
+        ),
+        (
+            "small",
+            "Whisper Small",
+            "ggml-small.bin",
+            true,
+            466,
+            "Balanced",
+            "Better",
+        ),
+        (
+            "medium",
+            "Whisper Medium",
+            "ggml-medium.bin",
+            true,
+            1530,
+            "Slower",
+            "Strong",
+        ),
+        (
+            "large-v3-turbo",
+            "Whisper Large v3 Turbo",
+            "ggml-large-v3-turbo.bin",
+            true,
+            1620,
+            "Balanced",
+            "Strong",
+        ),
+        (
+            "large-v3-turbo-q5-0",
+            "Whisper Large v3 Turbo Q5",
+            "ggml-large-v3-turbo-q5_0.bin",
+            true,
+            1080,
+            "Balanced",
+            "Strong",
+        ),
+        (
+            "large-v3",
+            "Whisper Large v3",
+            "ggml-large-v3.bin",
+            true,
+            3100,
+            "Slow",
+            "Best",
+        ),
+        (
+            "large-v3-q5-0",
+            "Whisper Large v3 Q5",
+            "ggml-large-v3-q5_0.bin",
+            true,
+            1810,
+            "Slow",
+            "Best",
+        ),
+        (
+            "tiny-en",
+            "Whisper Tiny English",
+            "ggml-tiny.en.bin",
+            false,
+            75,
+            "Fastest",
+            "English",
+        ),
+        (
+            "base-en",
+            "Whisper Base English",
+            "ggml-base.en.bin",
+            false,
+            142,
+            "Fast",
+            "English",
+        ),
+        (
+            "small-en",
+            "Whisper Small English",
+            "ggml-small.en.bin",
+            false,
+            466,
+            "Balanced",
+            "English",
+        ),
     ]
     .into_iter()
-    .map(|(id, name, file_name, multilingual, size_mb, speed, quality)| ModelCatalogItem {
-        id: id.to_string(),
-        name: name.to_string(),
-        file_name: file_name.to_string(),
-        multilingual,
-        size_mb,
-        speed: speed.to_string(),
-        quality: quality.to_string(),
-        url: format!("{base_url}/{file_name}"),
-        installed_path: None,
-        installed_source: None,
-    })
+    .map(
+        |(id, name, file_name, multilingual, size_mb, speed, quality)| ModelCatalogItem {
+            id: id.to_string(),
+            name: name.to_string(),
+            file_name: file_name.to_string(),
+            multilingual,
+            size_mb,
+            speed: speed.to_string(),
+            quality: quality.to_string(),
+            url: format!("{base_url}/{file_name}"),
+            installed_path: None,
+            installed_source: None,
+        },
+    )
     .collect()
 }
 
@@ -332,16 +390,6 @@ fn probe_whisper(candidate: &str) -> Option<String> {
         .lines()
         .find(|line| !line.trim().is_empty())
         .map(|line| line.trim().to_string())
-}
-
-fn extension_from_mime(mime_type: Option<&str>) -> &'static str {
-    match mime_type.unwrap_or_default() {
-        value if value.contains("wav") => "wav",
-        value if value.contains("mp4") || value.contains("m4a") => "m4a",
-        value if value.contains("ogg") => "ogg",
-        value if value.contains("mpeg") || value.contains("mp3") => "mp3",
-        _ => "webm",
-    }
 }
 
 fn clean_transcript(text: &str) -> String {
@@ -487,8 +535,10 @@ fn transcribe_wav_file(
         "ยังไม่พบ whisper-cli ตั้งค่า MAHIRO_WHISPER_CLI หรือ install whisper.cpp ก่อน".to_string()
     })?;
     let effective_language = effective_language(language);
-    let model_path = find_model_path_for_language(app, model_path, effective_language)
-        .ok_or_else(|| "ยังไม่พบ ggml model ใน Murmur app data ดาวน์โหลดจาก Models Library ก่อน".to_string())?;
+    let model_path =
+        find_model_path_for_language(app, model_path, effective_language).ok_or_else(|| {
+            "ยังไม่พบ ggml model ใน Murmur app data ดาวน์โหลดจาก Models Library ก่อน".to_string()
+        })?;
 
     let transcript_base = wav_path.with_extension("");
     let transcript_txt_path = transcript_base.with_extension("txt");
@@ -558,7 +608,10 @@ fn list_model_catalog(app: AppHandle) -> Result<Vec<ModelCatalogItem>, String> {
             if target_path.exists() {
                 item.installed_path = Some(target_path.to_string_lossy().to_string());
                 item.installed_source = Some("Murmur".to_string());
-            } else if let Some(model) = installed_models.iter().find(|model| model.name == item.file_name) {
+            } else if let Some(model) = installed_models
+                .iter()
+                .find(|model| model.name == item.file_name)
+            {
                 item.installed_path = Some(model.path.clone());
                 item.installed_source = Some(model.source.clone());
             }
@@ -601,7 +654,9 @@ fn download_model_blocking(app: AppHandle, model_id: String) -> Result<String, S
     let mut last_emit = 0_u64;
 
     loop {
-        let bytes_read = response.read(&mut buffer).map_err(|error| error.to_string())?;
+        let bytes_read = response
+            .read(&mut buffer)
+            .map_err(|error| error.to_string())?;
         if bytes_read == 0 {
             break;
         }
@@ -655,8 +710,12 @@ fn uninstall_model(app: AppHandle, model_id: String) -> Result<(), String> {
         return Ok(());
     }
 
-    let canonical_models_dir = app_models.canonicalize().map_err(|error| error.to_string())?;
-    let canonical_target = target_path.canonicalize().map_err(|error| error.to_string())?;
+    let canonical_models_dir = app_models
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let canonical_target = target_path
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
 
     if !canonical_target.starts_with(&canonical_models_dir) {
         return Err("ลบได้เฉพาะ model ที่ Murmur ดาวน์โหลดไว้เท่านั้น".to_string());
@@ -670,41 +729,29 @@ fn get_whisper_status(app: AppHandle) -> WhisperStatus {
     let whisper_binary = find_whisper_binary();
     let app_model_candidates = discover_app_models(&app).unwrap_or_default();
     let model_path = app_model_candidates.first().map(|model| model.path.clone());
-    let ffmpeg_path = find_ffmpeg_binary();
     let version = whisper_binary.as_deref().and_then(probe_whisper);
 
-    let available = whisper_binary.is_some() && model_path.is_some() && ffmpeg_path.is_some();
-    let message = match (&whisper_binary, &model_path, &ffmpeg_path) {
-        (Some(_), Some(_), Some(_)) => {
-            "พร้อมใช้งาน: พบ whisper.cpp, ggml model ใน Murmur app data และ ffmpeg แล้ว".to_string()
+    let available = whisper_binary.is_some() && model_path.is_some();
+    let message = match (&whisper_binary, &model_path) {
+        (Some(_), Some(_)) => {
+            "พร้อมใช้งาน: พบ whisper.cpp และ ggml model ใน Murmur app data แล้ว".to_string()
         }
-        (None, _, _) => {
+        (None, _) => {
             "ยังไม่พบ whisper-cli ตั้งค่า MAHIRO_WHISPER_CLI หรือวาง binary ใน /opt/homebrew/bin"
                 .to_string()
         }
-        (_, None, _) => "ยังไม่พบ ggml model ใน Murmur app data ดาวน์โหลดจาก Models Library ก่อน".to_string(),
-        (_, _, None) => "ยังไม่พบ ffmpeg สำหรับแปลงเสียงจาก browser recorder เป็น wav".to_string(),
+        (_, None) => {
+            "ยังไม่พบ ggml model ใน Murmur app data ดาวน์โหลดจาก Models Library ก่อน".to_string()
+        }
     };
 
     WhisperStatus {
         available,
         binary_path: whisper_binary,
         model_path,
-        ffmpeg_path,
         version,
         message,
     }
-}
-
-#[tauri::command]
-fn get_app_plan() -> Vec<&'static str> {
-    vec![
-        "Option + Space เริ่ม/หยุด dictation",
-        "บันทึกเสียงจาก microphone ผ่าน browser recorder",
-        "แปลงเสียงเป็น WAV ด้วย ffmpeg",
-        "ส่ง WAV เข้า whisper.cpp แล้ว copy transcript",
-        "ต่อยอด auto-paste/history/editor หลัง MVP เสถียร",
-    ]
 }
 
 #[tauri::command]
@@ -810,114 +857,6 @@ fn set_native_preferences(app: AppHandle, preferences: NativePreferences) -> Res
     };
 
     Ok(())
-}
-
-#[tauri::command]
-fn transcribe_audio(
-    app: AppHandle,
-    audio: Vec<u8>,
-    mime_type: Option<String>,
-    language: Option<String>,
-    model_path: Option<String>,
-) -> Result<TranscriptionResult, String> {
-    if audio.is_empty() {
-        return Err("ยังไม่มี audio data สำหรับ transcribe".to_string());
-    }
-
-    let whisper_binary = find_whisper_binary().ok_or_else(|| {
-        "ยังไม่พบ whisper-cli ตั้งค่า MAHIRO_WHISPER_CLI หรือ install whisper.cpp ก่อน".to_string()
-    })?;
-    let ffmpeg_binary =
-        find_ffmpeg_binary().ok_or_else(|| "ยังไม่พบ ffmpeg สำหรับแปลงไฟล์เสียงเป็น WAV".to_string())?;
-    let effective_language = effective_language(language.as_deref().unwrap_or("auto"));
-    let model_path = find_model_path_for_language(&app, model_path, effective_language)
-        .ok_or_else(|| "ยังไม่พบ ggml model ใน Murmur app data ดาวน์โหลดจาก Models Library ก่อน".to_string())?;
-
-    let recordings_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?
-        .join("recordings");
-    fs::create_dir_all(&recordings_dir).map_err(|error| error.to_string())?;
-
-    let stamp = timestamp_ms();
-    let raw_extension = extension_from_mime(mime_type.as_deref());
-    let raw_path = recordings_dir.join(format!("dictation-{stamp}.{raw_extension}"));
-    let wav_path = recordings_dir.join(format!("dictation-{stamp}.wav"));
-    let transcript_base = recordings_dir.join(format!("dictation-{stamp}"));
-    let transcript_txt_path = recordings_dir.join(format!("dictation-{stamp}.txt"));
-
-    fs::write(&raw_path, audio).map_err(|error| error.to_string())?;
-
-    let ffmpeg_output = Command::new(&ffmpeg_binary)
-        .args([
-            "-y",
-            "-i",
-            raw_path.to_string_lossy().as_ref(),
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            "-c:a",
-            "pcm_s16le",
-            wav_path.to_string_lossy().as_ref(),
-        ])
-        .output()
-        .map_err(|error| format!("เรียก ffmpeg ไม่สำเร็จ: {error}"))?;
-
-    if !ffmpeg_output.status.success() {
-        return Err(format!(
-            "ffmpeg แปลงเสียงไม่สำเร็จ: {}",
-            String::from_utf8_lossy(&ffmpeg_output.stderr)
-        ));
-    }
-
-    let language = language.unwrap_or_else(|| "auto".to_string());
-    let whisper_output = Command::new(&whisper_binary)
-        .args([
-            "-m",
-            model_path.as_str(),
-            "-f",
-            wav_path.to_string_lossy().as_ref(),
-            "-l",
-            language.as_str(),
-            "-nt",
-            "-np",
-            "-otxt",
-            "-of",
-            transcript_base.to_string_lossy().as_ref(),
-        ])
-        .output()
-        .map_err(|error| format!("เรียก whisper.cpp ไม่สำเร็จ: {error}"))?;
-
-    if !whisper_output.status.success() {
-        return Err(format!(
-            "whisper.cpp transcribe ไม่สำเร็จ: {}{}",
-            String::from_utf8_lossy(&whisper_output.stdout),
-            String::from_utf8_lossy(&whisper_output.stderr)
-        ));
-    }
-
-    let transcript_from_file = fs::read_to_string(&transcript_txt_path).unwrap_or_default();
-    let transcript_from_stdout = String::from_utf8_lossy(&whisper_output.stdout).to_string();
-    let transcript_source = if transcript_from_file.trim().is_empty() {
-        transcript_from_stdout.as_str()
-    } else {
-        transcript_from_file.as_str()
-    };
-    let transcript = clean_transcript(transcript_source);
-
-    if transcript.is_empty() {
-        return Err("transcribe เสร็จแล้ว แต่ยังไม่ได้ข้อความกลับมา".to_string());
-    }
-
-    Ok(TranscriptionResult {
-        transcript,
-        raw_audio_path: raw_path.to_string_lossy().to_string(),
-        wav_path: wav_path.to_string_lossy().to_string(),
-        model_path,
-        whisper_binary_path: whisper_binary,
-    })
 }
 
 fn start_native_recording(app: &AppHandle) -> Result<(), String> {
@@ -1204,15 +1143,15 @@ fn emit_tray_action(app: &tauri::AppHandle, action: &str, should_show_window: bo
     let _ = app.emit("tray-action", action);
 }
 
-fn emit_settings_action(app: &tauri::AppHandle, action: &str) {
+fn emit_section_action(app: &tauri::AppHandle, action: &str) {
     show_main_window(app);
     let _ = app.emit("settings-action", action);
 }
 
 fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     let toggle = MenuItem::with_id(app, "toggle", "Toggle Recording", true, Some("Alt+Space"))?;
-    let settings = MenuItem::with_id(app, "settings", "Settings...", true, Some("Cmd+,"))?;
-    let history = MenuItem::with_id(app, "history", "History...", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", "Open General", true, Some("Cmd+,"))?;
+    let history = MenuItem::with_id(app, "history", "Open History", true, None::<&str>)?;
     let status = MenuItem::with_id(app, "status", "Check whisper.cpp", true, None::<&str>)?;
     let show = MenuItem::with_id(app, "show", "Open Main Window", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, Some("Cmd+Q"))?;
@@ -1248,9 +1187,9 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
             "toggle" => {
                 let _ = toggle_native_recording(app.clone());
             }
-            "settings" => emit_settings_action(app, "settings"),
-            "history" => emit_settings_action(app, "history"),
-            "status" => emit_settings_action(app, "status"),
+            "settings" => emit_section_action(app, "settings"),
+            "history" => emit_section_action(app, "history"),
+            "status" => emit_section_action(app, "status"),
             "show" => emit_tray_action(app, "home", true),
             "quit" => app.exit(0),
             _ => {}
@@ -1294,7 +1233,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_whisper_status,
-            get_app_plan,
             list_available_models,
             list_model_catalog,
             download_model,
@@ -1306,8 +1244,7 @@ pub fn run() {
             show_indicator,
             set_native_preferences,
             toggle_native_recording,
-            cancel_native_recording,
-            transcribe_audio
+            cancel_native_recording
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

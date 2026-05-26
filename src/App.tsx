@@ -25,7 +25,6 @@ interface IWhisperStatus {
   available: boolean;
   binary_path: string | null;
   model_path: string | null;
-  ffmpeg_path: string | null;
   version: string | null;
   message: string;
 }
@@ -288,7 +287,6 @@ function MainApp() {
         available: false,
         binary_path: null,
         model_path: null,
-        ffmpeg_path: null,
         version: null,
         message: error instanceof Error ? error.message : "ตรวจสอบ whisper.cpp ไม่สำเร็จ",
       });
