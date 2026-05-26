@@ -1,0 +1,12 @@
+---
+import { cn } from '../../lib/utils';
+
+type Props = {
+  class?: string;
+};
+
+const { class: className } = Astro.props;
+---
+<section class={cn('rounded-lg border border-border bg-card text-card-foreground', className)}>
+  <slot />
+</section>

@@ -1,0 +1,151 @@
+---
+import { ArrowRight, Bot, Clipboard, Download, Github, Keyboard, Languages, Lock, Mic, Monitor, Settings, Terminal } from 'lucide-astro';
+import Badge from '../components/ui/badge.astro';
+import Button from '../components/ui/button.astro';
+import Card from '../components/ui/card.astro';
+import BaseLayout from '../layouts/base-layout.astro';
+
+const features = [
+  { title: 'Local transcription', detail: 'Audio stays on your Mac and is transcribed with whisper.cpp.', icon: Lock },
+  { title: 'Thai + English friendly', detail: 'Built for mixed Thai/English dictation without forcing technical terms to translate.', icon: Languages },
+  { title: 'Shortcut first', detail: 'Press ⌥ Space, speak, and send the text back to the app you were using.', icon: Keyboard },
+  { title: 'Model library', detail: 'Manage local ggml models directly from the app shell.', icon: Download },
+];
+---
+<BaseLayout>
+  <main class="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-5 py-5 sm:px-7 lg:px-8">
+    <header class="flex items-center justify-between border-b border-border pb-4">
+      <a href="#top" class="flex items-center gap-3 text-sm font-semibold text-foreground" aria-label="Murmur home">
+        <img src={`${import.meta.env.BASE_URL}murmur-logo-cute-borderless-trimmed.png`} alt="" class="size-8 rounded-md" />
+        <span>Murmur</span>
+      </a>
+      <nav class="hidden items-center gap-5 text-sm text-muted sm:flex" aria-label="Main navigation">
+        <a class="hover:text-foreground" href="#features">Features</a>
+        <a class="hover:text-foreground" href="#privacy">Privacy</a>
+        <a class="hover:text-foreground" href="#install">Install</a>
+      </nav>
+      <Button href="https://github.com/mahirocoko/murmur" target="_blank" variant="secondary" size="sm">
+        <Github class="size-4" />
+        GitHub
+      </Button>
+    </header>
+
+    <section id="top" class="grid gap-10 py-16 lg:grid-cols-[1fr_0.86fr] lg:items-center lg:py-20">
+      <div class="max-w-2xl">
+        <Badge>macOS · whisper.cpp · local-first</Badge>
+        <h1 class="mt-5 text-4xl font-bold tracking-[-0.035em] text-foreground sm:text-5xl lg:text-6xl">
+          Dictation that stays on your Mac.
+        </h1>
+        <p class="mt-5 max-w-xl text-base leading-7 text-muted sm:text-lg">
+          Murmur is a small macOS dictation app for turning speech into text with local Whisper transcription, Thai + English workflow support, and a fast shortcut-driven recording flow.
+        </p>
+        <div class="mt-7 flex flex-col gap-3 sm:flex-row">
+          <Button href="#install" size="lg">
+            Get started
+            <ArrowRight class="size-4" />
+          </Button>
+          <Button href="https://github.com/mahirocoko/murmur" target="_blank" variant="secondary" size="lg">
+            View source
+          </Button>
+        </div>
+      </div>
+
+      <Card class="overflow-hidden p-0 shadow-[0_18px_80px_rgba(0,0,0,0.24)]">
+        <div class="flex items-center gap-2 border-b border-border px-4 py-3">
+          <span class="size-3 rounded-full bg-[#ff5f57]"></span>
+          <span class="size-3 rounded-full bg-[#ffbd2e]"></span>
+          <span class="size-3 rounded-full bg-[#28c840]"></span>
+          <span class="ml-auto text-xs text-muted">Murmur</span>
+        </div>
+        <div class="grid min-h-[25rem] grid-cols-[4.8rem_1fr]">
+          <aside class="border-r border-border bg-[#1f1d1c] p-3">
+            <div class="mb-5 flex justify-center">
+              <img src={`${import.meta.env.BASE_URL}murmur-logo-cute-borderless-trimmed.png`} alt="" class="size-9 rounded-md" />
+            </div>
+            <div class="grid gap-3 text-muted">
+              <span class="grid size-10 place-items-center rounded-md bg-secondary text-foreground"><Monitor class="size-5" /></span>
+              <span class="grid size-10 place-items-center rounded-md"><Settings class="size-5" /></span>
+              <span class="grid size-10 place-items-center rounded-md"><Clipboard class="size-5" /></span>
+            </div>
+          </aside>
+          <section class="p-6">
+            <div class="flex items-center justify-between gap-4 border-b border-border pb-4">
+              <div>
+                <h2 class="text-2xl font-bold tracking-tight">Home</h2>
+                <p class="mt-1 text-sm text-muted">Local dictation status</p>
+              </div>
+              <span class="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm text-muted"><Mic class="size-4" /> Default mic</span>
+            </div>
+            <div class="mt-6 grid grid-cols-2 gap-3">
+              <div class="rounded-lg border border-border bg-[#2a2725] p-4">
+                <p class="text-sm text-muted">Engine</p>
+                <strong class="mt-1 block text-2xl text-[#baf3cd]">Ready</strong>
+              </div>
+              <div class="rounded-lg border border-border bg-[#2a2725] p-4">
+                <p class="text-sm text-muted">Output</p>
+                <strong class="mt-1 block text-2xl">Auto-paste</strong>
+              </div>
+            </div>
+            <div class="mt-5 rounded-lg border border-border bg-[#2a2725] p-4">
+              <h3 class="text-lg font-semibold">Record from anywhere</h3>
+              <p class="mt-2 text-sm leading-6 text-muted">Press <kbd class="rounded bg-black/30 px-1.5 py-0.5 text-xs text-foreground">⌥</kbd> <kbd class="rounded bg-black/30 px-1.5 py-0.5 text-xs text-foreground">Space</kbd>, speak normally, and let Murmur return text to your active app.</p>
+            </div>
+            <div class="mt-6 flex h-16 items-center gap-1 overflow-hidden rounded-lg border border-border bg-[#1f1d1c] px-4">
+              {Array.from({ length: 54 }).map((_, index) => (
+                <span class="w-1 rounded-full bg-primary/80" style={`height: ${8 + Math.abs(Math.sin(index * 0.55)) * 34}px`}></span>
+              ))}
+            </div>
+          </section>
+        </div>
+      </Card>
+    </section>
+
+    <section id="features" class="grid gap-4 py-8 sm:grid-cols-2 lg:grid-cols-4">
+      {features.map((feature) => {
+        const Icon = feature.icon;
+        return (
+          <Card class="p-5">
+            <Icon class="size-5 text-primary" />
+            <h2 class="mt-4 text-base font-semibold">{feature.title}</h2>
+            <p class="mt-2 text-sm leading-6 text-muted">{feature.detail}</p>
+          </Card>
+        );
+      })}
+    </section>
+
+    <section id="privacy" class="grid gap-5 py-10 lg:grid-cols-[0.7fr_1fr] lg:items-start">
+      <div>
+        <h2 class="text-2xl font-bold tracking-tight">Private by default</h2>
+        <p class="mt-3 text-sm leading-6 text-muted">Murmur is designed around a local-first transcription loop. The app records on-device, writes a local WAV, runs a local Whisper model, and then copies or pastes the transcript.</p>
+      </div>
+      <Card class="p-5">
+        <ul class="grid gap-3 text-sm text-muted">
+          <li class="flex gap-3"><Lock class="mt-0.5 size-4 text-primary" /> Audio is processed locally with whisper.cpp.</li>
+          <li class="flex gap-3"><Clipboard class="mt-0.5 size-4 text-primary" /> Transcript history stays in local app storage.</li>
+          <li class="flex gap-3"><Bot class="mt-0.5 size-4 text-primary" /> No hosted transcription service is required for the core flow.</li>
+        </ul>
+      </Card>
+    </section>
+
+    <section id="install" class="grid gap-5 py-10 lg:grid-cols-[0.7fr_1fr] lg:items-start">
+      <div>
+        <h2 class="text-2xl font-bold tracking-tight">Build from source</h2>
+        <p class="mt-3 text-sm leading-6 text-muted">Murmur is early and personal. For now, the safest path is cloning the repo and running the Tauri app locally.</p>
+      </div>
+      <Card class="overflow-hidden p-0">
+        <div class="border-b border-border px-4 py-3 text-sm font-semibold">Terminal</div>
+        <pre class="overflow-auto p-4 text-sm leading-7 text-muted"><code>git clone git@github.com:mahirocoko/murmur.git
+cd murmur
+pnpm install
+pnpm tauri dev</code></pre>
+      </Card>
+    </section>
+
+    <footer class="mt-auto flex flex-col gap-3 border-t border-border py-6 text-sm text-muted sm:flex-row sm:items-center sm:justify-between">
+      <span>MIT Licensed. Built for a local-first dictation workflow.</span>
+      <a class="inline-flex items-center gap-2 hover:text-foreground" href="https://github.com/mahirocoko/murmur" target="_blank" rel="noreferrer">
+        <Terminal class="size-4" /> Source on GitHub
+      </a>
+    </footer>
+  </main>
+</BaseLayout>
