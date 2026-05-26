@@ -67,7 +67,30 @@ export MAHIRO_WHISPER_CLI=/opt/homebrew/bin/whisper-cli
 
 Model หลักควรดาวน์โหลด/จัดการผ่าน Models section ในแอป เพื่อให้ไฟล์อยู่ใน Murmur app data และถูกเลือกอัตโนมัติได้ถูกต้อง
 
+## Quick install
+
+ถ้าอยาก build ไว้ใช้เองแบบเร็ว ๆ ให้ clone repo แล้ว build ตัว macOS app ได้เลย
+
+```sh
+git clone git@github.com:mahirocoko/murmur.git
+cd murmur
+pnpm install
+pnpm tauri build
+```
+
+build เสร็จแล้วเปิดแอปจากไฟล์นี้ได้ทันที
+
+```sh
+open src-tauri/target/release/bundle/macos/Murmur.app
+```
+
+หรือเอา `Murmur.app` ไปวางใน `/Applications` เองก็ได้ ถ้าต้องการใช้เป็นแอปประจำ
+
+ครั้งแรกที่ใช้งาน ให้เปิด Models ในแอปเพื่อดาวน์โหลด model ก่อน แล้วให้ macOS permissions ตามที่แอปแจ้ง โดยเฉพาะ Microphone และ Accessibility ถ้าจะใช้ auto-paste
+
 ## Quick start
+
+สำหรับ development ให้รันแบบ dev server
 
 ```sh
 pnpm install
