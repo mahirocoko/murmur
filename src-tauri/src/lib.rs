@@ -1180,7 +1180,7 @@ fn hide_main_window(app: AppHandle) -> Result<(), String> {
 fn setup_global_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
     app.plugin(
         tauri_plugin_global_shortcut::Builder::new()
-            .with_shortcuts(["alt+space", "esc"])
+            .with_shortcuts(["alt+space"])
             .expect("default dictation shortcut should be valid")
             .with_handler(|app, shortcut, event| {
                 if event.state != ShortcutState::Pressed {
@@ -1189,19 +1189,6 @@ fn setup_global_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
 
                 if shortcut.matches(Modifiers::ALT, Code::Space) {
                     let _ = toggle_native_recording(app.clone());
-                    return;
-                }
-
-                if shortcut.matches(Modifiers::empty(), Code::Escape) {
-                    let is_recording = app
-                        .state::<NativeRecorderState>()
-                        .recording
-                        .lock()
-                        .map(|guard| guard.is_some())
-                        .unwrap_or(false);
-                    if is_recording {
-                        let _ = cancel_native_recording(app.clone());
-                    }
                 }
             })
             .build(),

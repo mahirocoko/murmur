@@ -222,9 +222,7 @@ function IndicatorWindow() {
         <div className="indicator-actions">
           <kbd>⌥</kbd>
           <kbd>Space</kbd>
-          <span>toggle</span>
-          <kbd>esc</kbd>
-          <span>cancel</span>
+          <span>toggle / stop</span>
         </div>
       </div>
     </main>
