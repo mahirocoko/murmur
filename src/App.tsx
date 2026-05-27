@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
 import { Effect, EffectState, getCurrentWindow } from '@tauri-apps/api/window'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
-import type { ComponentType, SVGProps } from 'react'
+import type { ComponentType, CSSProperties, SVGProps } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import IconCheckCircle from '~icons/lucide/check-circle'
 import IconCircleDot from '~icons/lucide/circle-dot'
@@ -110,8 +110,14 @@ const outputOptions: Array<{ value: OutputMode; label: string; detail: string }>
 
 const WAVE_BAR_COUNT = 78
 const WAVE_SCROLL_STEP = 2
-const LOADING_WAVE_BAR_COUNT = 72
-const LOADING_WAVE_TIME_SCALE = 0.05 / 48
+const LOADING_WAVE_BAR_COUNT = WAVE_BAR_COUNT
+const LOADING_WAVE_PATTERN = [1, 0.66, 0.84, 0.5, 0.74, 0.94, 0.58, 0.82, 0.62] as const
+
+type LoadingBarStyle = CSSProperties & {
+  '--wave-delay': string
+  '--wave-duration': string
+  '--wave-peak': string
+}
 
 function readTranscriptHistory() {
   try {
@@ -146,14 +152,11 @@ function IndicatorWindow() {
   const [audioLevel, setAudioLevel] = useState(0)
   const [waveBars, setWaveBars] = useState(() => Array.from({ length: WAVE_BAR_COUNT }, () => 0))
 
-  // _Ref
-  const loadingWaveBarRefs = useRef<Array<HTMLElement | null>>([])
-
   // _Memo
   const waveHeights = useMemo(() => {
     const level = state === 'recording' ? Math.sqrt(audioLevel) : 0
-    const floor = 2
-    const max = 38
+    const floor = 4
+    const max = 52
 
     return waveBars.map((bar) => {
       const voice = Math.max(bar * 0.9, level * 0.08)
@@ -225,62 +228,6 @@ function IndicatorWindow() {
     setWaveBars(Array.from({ length: WAVE_BAR_COUNT }, () => 0))
   }, [state])
 
-  useEffect(() => {
-    if (state === 'recording') return
-    const bars = loadingWaveBarRefs.current
-    if (!bars.length) return
-
-    const minScale = 0.06
-    const speed = state === 'pasting' ? 1 / 0.88 : 1
-    const startTimestamp = performance.now()
-    let rafHandle = 0
-    let lastWrittenTime = -1
-
-    const renderFrame = (timestamp: number) => {
-      const elapsedMs = (timestamp - startTimestamp) * speed
-      const time = elapsedMs * LOADING_WAVE_TIME_SCALE
-
-      if (time !== lastWrittenTime) {
-        lastWrittenTime = time
-
-        const env1Center = ((time * 0.42) % 1.4) - 0.2
-        const env2Center = ((time * 0.27 + 0.55) % 1.4) - 0.2
-        const env3Center = ((time * 0.36 + 1.05) % 1.4) - 0.2
-        const carrierPhase = time * 2.6
-        const idlePhase = time * 1.8
-
-        for (let index = 0; index < bars.length; index += 1) {
-          const node = bars[index]
-          if (!node) continue
-          const u = index / (LOADING_WAVE_BAR_COUNT - 1)
-
-          const d1 = Math.abs(u - env1Center) / 0.18
-          const p1 = d1 >= 1 ? 0 : Math.pow(Math.cos((d1 * Math.PI) / 2), 2)
-          const d2 = Math.abs(u - env2Center) / 0.14
-          const p2 = d2 >= 1 ? 0 : Math.pow(Math.cos((d2 * Math.PI) / 2), 2) * 0.78
-          const d3 = Math.abs(u - env3Center) / 0.22
-          const p3 = d3 >= 1 ? 0 : Math.pow(Math.cos((d3 * Math.PI) / 2), 2) * 0.62
-          const envelope = Math.max(p1, p2, p3)
-
-          const carrier = 0.62 + 0.38 * Math.abs(Math.sin(u * Math.PI * 14 - carrierPhase))
-          const idle = 0.05 + 0.04 * Math.abs(Math.sin(u * Math.PI * 10 + idlePhase))
-          const amplitude = Math.max(idle, envelope * carrier)
-
-          const scale = minScale + Math.pow(amplitude, 0.9) * (1 - minScale)
-          const opacity = 0.42 + Math.min(amplitude * 0.66, 0.5)
-
-          node.style.transform = `translateZ(0) scaleY(${scale})`
-          node.style.opacity = `${opacity}`
-        }
-      }
-
-      rafHandle = window.requestAnimationFrame(renderFrame)
-    }
-
-    rafHandle = window.requestAnimationFrame(renderFrame)
-    return () => window.cancelAnimationFrame(rafHandle)
-  }, [state])
-
   return (
     <main className={`indicator-shell ${state}`}>
       <div
@@ -291,15 +238,23 @@ function IndicatorWindow() {
           ? waveHeights.map((height, index) => (
               <i key={index} style={{ height: `${height}px`, opacity: 0.38 + Math.min(height / 44, 0.54) }} />
             ))
-          : loadingBarIndices.map((index) => (
-              <i
-                key={index}
-                style={{ opacity: 0.42, transform: 'translateZ(0) scaleY(0.06)' }}
-                ref={(node) => {
-                  loadingWaveBarRefs.current[index] = node
-                }}
-              />
-            ))}
+          : loadingBarIndices.map((index) => {
+              const peak = LOADING_WAVE_PATTERN[index % LOADING_WAVE_PATTERN.length]
+              const duration = state === 'pasting' ? '0.88s' : '1.08s'
+
+              return (
+                <i
+                  key={index}
+                  style={
+                    {
+                      '--wave-delay': `${index * -58}ms`,
+                      '--wave-duration': duration,
+                      '--wave-peak': peak.toString(),
+                    } as LoadingBarStyle
+                  }
+                />
+              )
+            })}
       </div>
       <div className="indicator-footer">
         <div className="indicator-mode">

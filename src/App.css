@@ -929,9 +929,10 @@ button.model-row {
 .indicator-wave {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 0.12rem;
+  justify-content: space-between;
+  width: 100%;
   min-width: 0;
+  padding: 0 0.1rem;
 }
 .indicator-wave i {
   display: block;
@@ -947,18 +948,17 @@ button.model-row {
 }
 .loading-wave {
   width: 100%;
-  justify-content: space-between;
-  gap: 0;
-  padding: 0 0.1rem;
 }
 .loading-wave i {
-  width: 0.15rem;
-  height: 3.65rem;
+  width: 0.16rem;
+  height: 3.8rem;
   min-height: 0.13rem;
   background: linear-gradient(180deg, rgba(255, 248, 226, 0.98), var(--warning));
   transform-origin: center;
+  transform: translateZ(0) scaleY(0.12);
+  animation: loading-equalizer var(--wave-duration, 1.08s) ease-in-out infinite both;
+  animation-delay: var(--wave-delay, 0ms);
   will-change: transform, opacity;
-  transform: translateZ(0);
 }
 .indicator-shell.done .loading-wave i {
   background: linear-gradient(180deg, rgba(218, 255, 229, 0.96), var(--success));
@@ -1042,4 +1042,15 @@ kbd {
 }
 .indicator-shell.error {
   background: rgba(42, 24, 24, 0.94);
+}
+@keyframes loading-equalizer {
+  0%,
+  100% {
+    opacity: 0.36;
+    transform: translateZ(0) scaleY(0.12);
+  }
+  50% {
+    opacity: 0.96;
+    transform: translateZ(0) scaleY(var(--wave-peak, 1));
+  }
 }
