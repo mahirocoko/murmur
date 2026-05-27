@@ -939,37 +939,32 @@ button.model-row {
   min-height: 0.16rem;
   border-radius: 999px;
   background: var(--accent);
+}
+.recording-wave i {
   transition:
     height 75ms ease-out,
     opacity 75ms ease-out;
 }
 .loading-wave {
   width: 100%;
-  justify-content: center;
-  gap: 0.12rem;
+  justify-content: space-between;
+  gap: 0;
+  padding: 0 0.1rem;
 }
-.loading-wave span {
-  display: block;
-  width: 0.16rem;
-  height: 2.45rem;
-  border-radius: 999px;
-  background: linear-gradient(180deg, rgba(255, 244, 214, 0.96), var(--warning));
-  opacity: 0.42;
-  transform: translateY(var(--wave-fall, 2px)) scaleY(0.24);
+.loading-wave i {
+  width: 0.15rem;
+  height: 3.65rem;
+  min-height: 0.13rem;
+  background: linear-gradient(180deg, rgba(255, 248, 226, 0.98), var(--warning));
   transform-origin: center;
-  animation: loading-wave var(--wave-duration, 1.18s) cubic-bezier(0.42, 0, 0.18, 1) infinite both;
-  animation-delay: var(--wave-delay, 0ms);
+  will-change: transform, opacity;
+  transform: translateZ(0);
 }
-.indicator-shell.pasting .loading-wave span {
-  animation-duration: calc(var(--wave-duration, 1.18s) * 0.88);
-}
-.indicator-shell.done .loading-wave span {
+.indicator-shell.done .loading-wave i {
   background: linear-gradient(180deg, rgba(218, 255, 229, 0.96), var(--success));
-  animation-duration: calc(var(--wave-duration, 1.18s) * 1.32);
 }
-.indicator-shell.error .loading-wave span {
+.indicator-shell.error .loading-wave i {
   background: linear-gradient(180deg, rgba(255, 215, 211, 0.96), var(--danger));
-  animation-duration: calc(var(--wave-duration, 1.18s) * 1.18);
 }
 .indicator-footer {
   display: flex;
@@ -1047,26 +1042,4 @@ kbd {
 }
 .indicator-shell.error {
   background: rgba(42, 24, 24, 0.94);
-}
-@keyframes loading-wave {
-  100% {
-    opacity: 0.4;
-    transform: translateY(var(--wave-fall, 2px)) scaleY(0.24);
-  }
-  0% {
-    opacity: 0.36;
-    transform: translateY(var(--wave-fall, 2px)) scaleY(0.26);
-  }
-  18% {
-    opacity: 0.58;
-    transform: translateY(0) scaleY(0.5);
-  }
-  44% {
-    opacity: 0.96;
-    transform: translateY(var(--wave-rise, -3px)) scaleY(var(--wave-peak, 1));
-  }
-  68% {
-    opacity: 0.62;
-    transform: translateY(var(--wave-fall, 2px)) scaleY(0.36);
-  }
 }
