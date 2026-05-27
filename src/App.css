@@ -964,6 +964,12 @@ button.model-row {
   font-size: 0.72rem;
   white-space: nowrap;
 }
+.indicator-action-divider {
+  width: 1px;
+  height: 0.72rem;
+  margin: 0 0.12rem;
+  background: rgba(255, 255, 255, 0.16);
+}
 kbd {
   display: inline-flex;
   align-items: center;

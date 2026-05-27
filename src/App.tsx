@@ -156,7 +156,7 @@ function IndicatorWindow() {
   }, [audioLevel, state, waveBars])
 
   const indicatorCopy: Record<string, { title: string; detail: string }> = {
-    recording: { title: 'Listening', detail: 'Press ⌥ Space to stop' },
+    recording: { title: 'Listening', detail: 'Esc cancels this take' },
     transcribing: { title: 'Transcribing', detail: 'Turning speech into text' },
     pasting: { title: 'Pasting', detail: 'Sending text to the active app' },
     done: { title: 'Done', detail: 'Transcript copied' },
@@ -252,9 +252,16 @@ function IndicatorWindow() {
           <span>{copy.detail}</span>
         </div>
         <div className="indicator-actions">
+          {state === 'recording' ? (
+            <>
+              <kbd>Esc</kbd>
+              <span>cancel</span>
+              <span className="indicator-action-divider" aria-hidden="true" />
+            </>
+          ) : null}
           <kbd>⌥</kbd>
           <kbd>Space</kbd>
-          <span>toggle / stop</span>
+          <span>{state === 'recording' ? 'stop' : 'toggle'}</span>
         </div>
       </div>
     </main>

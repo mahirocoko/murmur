@@ -45,7 +45,7 @@ pnpm tauri build --debug
 2. Press `Option + Space` from any app, or click the record button in the main shell.
 3. Rust starts native CPAL recording from the default input device and writes a WAV file with hound.
 4. The non-focusable indicator appears and shows a rolling waveform from real microphone input.
-5. Press `Option + Space` again to stop.
+5. Press `Option + Space` again to stop, or press `Esc` to cancel the current recording.
 6. Rust runs `whisper-cli` against the WAV file and reads the generated transcript.
 7. The transcript is written to the native Unicode clipboard through `arboard`.
 8. If output mode is `paste`, Murmur sends a CoreGraphics `Cmd+V` event back to the active app.
@@ -53,9 +53,9 @@ pnpm tauri build --debug
 
 ## Shortcut behavior
 
-`Option + Space` is the only global shortcut. It toggles native recording directly without opening/focusing the main window, so the previously focused app keeps focus.
+`Option + Space` is always registered as the global toggle. It toggles native recording directly without opening/focusing the main window, so the previously focused app keeps focus.
 
-Murmur intentionally does **not** register global `Esc`. A previous global Esc shortcut intercepted Esc in other apps even when Murmur was not focused. The current frontend still listens for Escape while the main window is focused, but it should not consume Esc globally.
+`Esc` is registered only while native recording is active. Pressing `Esc` cancels the current recording, drops the temporary WAV, hides the indicator, and unregisters the global `Esc` shortcut immediately. This keeps cancel available from the non-focusable indicator flow without consuming `Esc` globally after recording ends.
 
 ## Tray behavior
 
@@ -103,7 +103,7 @@ The floating indicator listens to `dictation-state`, `indicator-state`, `audio-l
 - Recording uses a rolling waveform timeline. New bars append from the right; older bars slide left and remain visible until they leave the viewport.
 - Stop switches to `Transcribing` immediately before whisper.cpp runs.
 - Then it switches to `Pasting`, then briefly `Done` or `Needs attention`, before hiding.
-- Non-recording states use a spinner so the indicator does not look stuck on listening.
+- Non-recording states use a loading wave so the indicator does not look stuck on listening.
 
 ## Landing site
 

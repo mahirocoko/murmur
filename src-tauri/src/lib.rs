@@ -19,7 +19,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Size, WindowEvent,
 };
-use tauri_plugin_global_shortcut::{Code, Modifiers, ShortcutState};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutState};
 
 #[derive(Debug, Serialize)]
 struct WhisperStatus {
@@ -961,6 +961,7 @@ fn start_native_recording(app: &AppHandle) -> Result<(), String> {
         writer,
     });
 
+    register_recording_escape_shortcut(app);
     let _ = app.emit("dictation-state", "recording");
     let _ = show_indicator(app.clone(), "Recording".to_string());
     Ok(())
@@ -1020,6 +1021,7 @@ fn finish_native_recording(
         }
     }
 
+    unregister_recording_escape_shortcut(&app);
     let _ = hide_indicator(app);
 }
 
@@ -1036,10 +1038,20 @@ fn take_native_recording(app: &AppHandle) -> Result<Option<NativeRecording>, Str
     Ok(recording)
 }
 
+fn is_native_recording_active(app: &AppHandle) -> bool {
+    let state = app.state::<NativeRecorderState>();
+    state
+        .recording
+        .lock()
+        .map(|guard| guard.is_some())
+        .unwrap_or(false)
+}
+
 fn stop_native_recording(app: AppHandle) -> Result<(), String> {
     let Some(recording) = take_native_recording(&app)? else {
         return Ok(());
     };
+    unregister_recording_escape_shortcut(&app);
     let _ = app.emit("dictation-state", "transcribing");
     let _ = show_indicator(app.clone(), "Transcribing".to_string());
 
@@ -1062,6 +1074,7 @@ fn cancel_native_recording(app: AppHandle) -> Result<(), String> {
     let Some(recording) = take_native_recording(&app)? else {
         return Ok(());
     };
+    unregister_recording_escape_shortcut(&app);
     drop(recording.stream);
     if let Ok(mut guard) = recording.writer.lock() {
         let _ = guard.take();
@@ -1134,6 +1147,40 @@ fn setup_global_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
     )?;
 
     Ok(())
+}
+
+fn register_recording_escape_shortcut(app: &tauri::AppHandle) {
+    let app = app.clone();
+
+    std::thread::spawn(move || {
+        if !is_native_recording_active(&app) || app.global_shortcut().is_registered("escape") {
+            return;
+        }
+
+        let _ = app
+            .global_shortcut()
+            .on_shortcut("escape", |app, _, event| {
+                if event.state != ShortcutState::Pressed {
+                    return;
+                }
+
+                let _ = cancel_native_recording(app.clone());
+            });
+
+        if !is_native_recording_active(&app) {
+            let _ = app.global_shortcut().unregister("escape");
+        }
+    });
+}
+
+fn unregister_recording_escape_shortcut(app: &tauri::AppHandle) {
+    let app = app.clone();
+
+    std::thread::spawn(move || {
+        if app.global_shortcut().is_registered("escape") {
+            let _ = app.global_shortcut().unregister("escape");
+        }
+    });
 }
 
 fn emit_tray_action(app: &tauri::AppHandle, action: &str, should_show_window: bool) {
