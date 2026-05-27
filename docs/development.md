@@ -43,7 +43,7 @@ pnpm tauri build --debug
 
 1. Open Murmur or leave it in the tray.
 2. Press `Option + Space` from any app, or click the record button in the main shell.
-3. Rust starts native CPAL recording from the default input device and writes a WAV file with hound.
+3. Rust starts native CPAL recording from the selected input device, or from the system default when no device is pinned, and writes a WAV file with hound.
 4. The non-focusable indicator appears and shows a rolling waveform from real microphone input.
 5. Press `Option + Space` again to stop, or press `Esc` to cancel the current recording.
 6. Rust runs `whisper-cli` against the WAV file and reads the generated transcript.
@@ -64,6 +64,7 @@ Left-clicking the menu bar icon opens the native tray menu. Right-clicking the t
 Tray actions:
 
 - `Toggle Recording` — calls the native recording toggle.
+- `Microphone` — selects the input device or returns to system default.
 - `Open History` — opens the main shell and switches to History.
 - `Open General` — opens the main shell and switches to General.
 - `Check whisper.cpp` — opens the main shell, switches Home/status context, and refreshes status.
@@ -82,7 +83,9 @@ The sidebar supports icon-only collapse. When editing it, test traffic controls,
 
 ## Language behavior
 
-Native background transcription reads language/model/output preferences from the main shell. The default spoken language is Thai + English mixed (`mixed-th-en`) because short Thai dictation clips can be misdetected as English. If the selected language is not English, model selection avoids `.en.bin` models unless the user explicitly selects/overrides one.
+Native background transcription reads language/model/output/input-device preferences from the main shell. The default spoken language is Thai + English mixed (`mixed-th-en`) because short Thai dictation clips can be misdetected as English. If the selected language is not English, model selection avoids `.en.bin` models unless the user explicitly selects/overrides one.
+
+Input device selection is available in both the main toolbar and tray menu. Choosing `Use system default` keeps following macOS' current default microphone; choosing a named device pins recording to that CPAL device name when available.
 
 ## Clipboard encoding
 

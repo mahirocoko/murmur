@@ -309,6 +309,10 @@ p {
   gap: 0.45rem;
   margin-left: auto;
 }
+.toolbar-device-menu {
+  position: relative;
+  min-width: 0;
+}
 .toolbar-device,
 .toolbar-record {
   display: inline-flex;
@@ -329,7 +333,7 @@ p {
 }
 .toolbar-device {
   color: var(--muted);
-  max-width: 16rem;
+  max-width: 18rem;
 }
 .toolbar-device span {
   overflow: hidden;
@@ -339,6 +343,59 @@ p {
 .toolbar-device:hover {
   color: var(--text);
   background: rgba(255, 255, 255, 0.08);
+}
+.input-device-popover {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 10;
+  display: grid;
+  gap: 0.12rem;
+  width: min(19rem, calc(100vw - 2rem));
+  padding: 0.3rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: rgba(38, 35, 32, 0.98);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+}
+.input-device-option {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr) 1rem;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  border: 0;
+  border-radius: 7px;
+  padding: 0.46rem 0.52rem;
+  color: var(--muted);
+  background: transparent;
+  text-align: left;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+.input-device-option:hover,
+.input-device-option.selected {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.075);
+}
+.input-device-option svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  color: var(--subtle);
+}
+.input-device-option.selected svg:last-child {
+  color: var(--success);
+}
+.input-device-option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.input-device-empty {
+  margin: 0;
+  padding: 0.5rem 0.52rem;
+  color: var(--subtle);
+  font-size: 0.78rem;
 }
 .toolbar-record {
   border-color: rgba(201, 120, 69, 0.5);

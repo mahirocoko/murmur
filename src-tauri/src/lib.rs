@@ -15,7 +15,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample};
 use serde::{Deserialize, Serialize};
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Size, WindowEvent,
 };
@@ -61,6 +61,13 @@ struct ModelDownloadProgress {
     state: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct InputDeviceInfo {
+    name: String,
+    is_default: bool,
+    is_selected: bool,
+}
+
 type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
 type AudioLevelThrottle = Arc<Mutex<u128>>;
 const AUDIO_WAVEFORM_BARS: usize = 78;
@@ -75,11 +82,12 @@ struct NativeRecording {
 // We keep it behind app state only to hold/drop the live stream across shortcut events.
 unsafe impl Send for NativeRecording {}
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct NativePreferences {
     language: String,
     model_path: Option<String>,
     output_mode: String,
+    input_device_name: Option<String>,
 }
 
 impl Default for NativePreferences {
@@ -88,6 +96,7 @@ impl Default for NativePreferences {
             language: "th".to_string(),
             model_path: None,
             output_mode: "paste".to_string(),
+            input_device_name: None,
         }
     }
 }
@@ -836,6 +845,100 @@ fn paste_clipboard() -> Result<(), String> {
     Ok(())
 }
 
+fn get_native_preferences(app: &AppHandle) -> Result<NativePreferences, String> {
+    let state = app.state::<NativeRecorderState>();
+    let guard = state
+        .preferences
+        .lock()
+        .map_err(|_| "native preferences lock failed".to_string())?;
+
+    Ok(guard.clone())
+}
+
+fn set_selected_input_device(
+    app: &AppHandle,
+    input_device_name: Option<String>,
+) -> Result<NativePreferences, String> {
+    let state = app.state::<NativeRecorderState>();
+    let mut guard = state
+        .preferences
+        .lock()
+        .map_err(|_| "native preferences lock failed".to_string())?;
+
+    guard.input_device_name = input_device_name.filter(|name| !name.trim().is_empty());
+    Ok(guard.clone())
+}
+
+fn collect_input_devices(selected_input_device_name: Option<&str>) -> Vec<InputDeviceInfo> {
+    let host = cpal::default_host();
+    let default_name = host.default_input_device().and_then(|device| {
+        #[allow(deprecated)]
+        device.name().ok()
+    });
+    let mut seen = BTreeSet::new();
+    let mut devices = Vec::new();
+
+    let Ok(input_devices) = host.input_devices() else {
+        return devices;
+    };
+
+    for device in input_devices {
+        #[allow(deprecated)]
+        let Ok(name) = device.name() else {
+            continue;
+        };
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+
+        let is_default = default_name.as_deref() == Some(name.as_str());
+        let is_selected = selected_input_device_name
+            .map(|selected_name| selected_name == name)
+            .unwrap_or(is_default);
+
+        devices.push(InputDeviceInfo {
+            name,
+            is_default,
+            is_selected,
+        });
+    }
+
+    devices.sort_by(|a, b| {
+        b.is_default
+            .cmp(&a.is_default)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    devices
+}
+
+fn resolve_input_device(
+    host: &cpal::Host,
+    selected_input_device_name: Option<&str>,
+) -> Result<cpal::Device, String> {
+    if let Some(selected_name) = selected_input_device_name {
+        if let Ok(input_devices) = host.input_devices() {
+            for device in input_devices {
+                #[allow(deprecated)]
+                if device.name().ok().as_deref() == Some(selected_name) {
+                    return Ok(device);
+                }
+            }
+        }
+    }
+
+    host.default_input_device()
+        .ok_or_else(|| "ไม่พบ input microphone device".to_string())
+}
+
+#[tauri::command]
+fn list_input_devices(app: AppHandle) -> Result<Vec<InputDeviceInfo>, String> {
+    let preferences = get_native_preferences(&app)?;
+    Ok(collect_input_devices(
+        preferences.input_device_name.as_deref(),
+    ))
+}
+
 #[tauri::command]
 fn set_native_preferences(app: AppHandle, preferences: NativePreferences) -> Result<(), String> {
     let state = app.state::<NativeRecorderState>();
@@ -844,7 +947,7 @@ fn set_native_preferences(app: AppHandle, preferences: NativePreferences) -> Res
         .lock()
         .map_err(|_| "native preferences lock failed".to_string())?;
 
-    *guard = NativePreferences {
+    let next_preferences = NativePreferences {
         language: if preferences.language.trim().is_empty() {
             "th".to_string()
         } else {
@@ -854,7 +957,18 @@ fn set_native_preferences(app: AppHandle, preferences: NativePreferences) -> Res
             .model_path
             .filter(|path| !path.trim().is_empty()),
         output_mode: preferences.output_mode,
+        input_device_name: preferences
+            .input_device_name
+            .filter(|name| !name.trim().is_empty()),
     };
+    *guard = next_preferences.clone();
+    drop(guard);
+
+    let _ = app.emit(
+        "input-devices-updated",
+        collect_input_devices(next_preferences.input_device_name.as_deref()),
+    );
+    let _ = refresh_tray_menu(&app);
 
     Ok(())
 }
@@ -878,10 +992,9 @@ fn start_native_recording(app: &AppHandle) -> Result<(), String> {
     fs::create_dir_all(&recordings_dir).map_err(|error| error.to_string())?;
     let wav_path = recordings_dir.join(format!("native-dictation-{}.wav", timestamp_ms()));
 
+    let preferences = get_native_preferences(app)?;
     let host = cpal::default_host();
-    let device = host
-        .default_input_device()
-        .ok_or_else(|| "ไม่พบ input microphone device".to_string())?;
+    let device = resolve_input_device(&host, preferences.input_device_name.as_deref())?;
     let config = device
         .default_input_config()
         .map_err(|error| format!("อ่านค่า microphone config ไม่สำเร็จ: {error}"))?;
@@ -1195,8 +1308,70 @@ fn emit_section_action(app: &tauri::AppHandle, action: &str) {
     let _ = app.emit("settings-action", action);
 }
 
-fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
+fn apply_selected_input_device(app: &AppHandle, input_device_name: Option<String>) {
+    if let Ok(preferences) = set_selected_input_device(app, input_device_name) {
+        let _ = app.emit("preferences-updated", preferences.clone());
+        let _ = app.emit(
+            "input-devices-updated",
+            collect_input_devices(preferences.input_device_name.as_deref()),
+        );
+    }
+
+    let _ = refresh_tray_menu(app);
+}
+
+fn build_input_device_menu(app: &AppHandle) -> tauri::Result<Submenu<tauri::Wry>> {
+    let preferences = get_native_preferences(app).unwrap_or_default();
+    let devices = collect_input_devices(preferences.input_device_name.as_deref());
+    let input_menu = Submenu::with_id(app, "input-devices", "Microphone", true)?;
+    let default_item = CheckMenuItem::with_id(
+        app,
+        "input:default",
+        "Use system default",
+        true,
+        preferences.input_device_name.is_none(),
+        None::<&str>,
+    )?;
+    input_menu.append(&default_item)?;
+
+    if devices.is_empty() {
+        let empty_item = MenuItem::with_id(
+            app,
+            "input:none",
+            "No microphones found",
+            false,
+            None::<&str>,
+        )?;
+        input_menu.append(&empty_item)?;
+        return Ok(input_menu);
+    }
+
+    let separator = PredefinedMenuItem::separator(app)?;
+    input_menu.append(&separator)?;
+
+    for (index, device) in devices.iter().enumerate() {
+        let label = if device.is_default {
+            format!("{} (Default)", device.name)
+        } else {
+            device.name.clone()
+        };
+        let item = CheckMenuItem::with_id(
+            app,
+            format!("input:{index}"),
+            label,
+            true,
+            preferences.input_device_name.as_deref() == Some(device.name.as_str()),
+            None::<&str>,
+        )?;
+        input_menu.append(&item)?;
+    }
+
+    Ok(input_menu)
+}
+
+fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let toggle = MenuItem::with_id(app, "toggle", "Toggle Recording", true, Some("Alt+Space"))?;
+    let input_menu = build_input_device_menu(app)?;
     let settings = MenuItem::with_id(app, "settings", "Open General", true, Some("Cmd+,"))?;
     let history = MenuItem::with_id(app, "history", "Open History", true, None::<&str>)?;
     let status = MenuItem::with_id(app, "status", "Check whisper.cpp", true, None::<&str>)?;
@@ -1205,27 +1380,41 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
     let separator_one = PredefinedMenuItem::separator(app)?;
     let separator_two = PredefinedMenuItem::separator(app)?;
     let separator_three = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(
+    Menu::with_items(
         app,
         &[
             &toggle,
             &separator_one,
+            &input_menu,
+            &separator_two,
             &history,
             &settings,
             &status,
-            &separator_two,
-            &show,
             &separator_three,
+            &show,
             &quit,
         ],
-    )?;
+    )
+}
+
+fn refresh_tray_menu(app: &AppHandle) -> tauri::Result<()> {
+    if let Some(tray) = app.tray_by_id("main") {
+        let menu = build_tray_menu(app)?;
+        tray.set_menu(Some(menu))?;
+    }
+
+    Ok(())
+}
+
+fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
+    let menu = build_tray_menu(app.handle())?;
 
     let icon = app
         .default_window_icon()
         .cloned()
         .expect("default app icon should exist");
 
-    TrayIconBuilder::new()
+    TrayIconBuilder::with_id("main")
         .icon(icon)
         .tooltip("Murmur")
         .menu(&menu)
@@ -1233,6 +1422,17 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "toggle" => {
                 let _ = toggle_native_recording(app.clone());
+            }
+            "input:default" => apply_selected_input_device(app, None),
+            id if id.starts_with("input:") => {
+                if let Ok(index) = id.trim_start_matches("input:").parse::<usize>() {
+                    let preferences = get_native_preferences(app).unwrap_or_default();
+                    if let Some(device) =
+                        collect_input_devices(preferences.input_device_name.as_deref()).get(index)
+                    {
+                        apply_selected_input_device(app, Some(device.name.clone()));
+                    }
+                }
             }
             "settings" => emit_section_action(app, "settings"),
             "history" => emit_section_action(app, "history"),
@@ -1280,6 +1480,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_whisper_status,
+            list_input_devices,
             list_available_models,
             list_model_catalog,
             download_model,

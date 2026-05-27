@@ -9,8 +9,10 @@ import IconCircleDot from '~icons/lucide/circle-dot'
 import IconCloud from '~icons/lucide/cloud'
 import IconDownload from '~icons/lucide/download'
 import IconHardDrive from '~icons/lucide/hard-drive'
+import IconHeadphones from '~icons/lucide/headphones'
 import IconHistory from '~icons/lucide/history'
 import IconHome from '~icons/lucide/home'
+import IconLaptop from '~icons/lucide/laptop'
 import IconLibraryBig from '~icons/lucide/library-big'
 import IconMic from '~icons/lucide/mic'
 import IconPanelLeftClose from '~icons/lucide/panel-left-close'
@@ -18,6 +20,7 @@ import IconPanelLeftOpen from '~icons/lucide/panel-left-open'
 import IconRefreshCw from '~icons/lucide/refresh-cw'
 import IconShieldCheck from '~icons/lucide/shield-check'
 import IconSlidersHorizontal from '~icons/lucide/sliders-horizontal'
+import IconSmartphone from '~icons/lucide/smartphone'
 import IconTrash2 from '~icons/lucide/trash-2'
 import './App.css'
 
@@ -57,6 +60,12 @@ interface IModelDownloadProgress {
   state: string
 }
 
+interface IInputDeviceInfo {
+  name: string
+  is_default: boolean
+  is_selected: boolean
+}
+
 type DictationState = 'idle' | 'requesting-mic' | 'recording' | 'transcribing' | 'pasting' | 'done' | 'error'
 type OutputMode = 'copy' | 'paste'
 type SettingsSection = 'general' | 'history' | 'models' | 'permissions'
@@ -69,17 +78,20 @@ const STORAGE_KEYS = {
   language: 'murmur-language',
   modelPath: 'murmur-model-path',
   outputMode: 'murmur-output-mode',
+  inputDeviceName: 'murmur-input-device-name',
 } as const
 const LEGACY_STORAGE_KEYS = {
   language: 'mahiro-whisper-language',
   modelPath: 'mahiro-whisper-model-path',
   outputMode: 'mahiro-whisper-output-mode',
+  inputDeviceName: 'mahiro-whisper-input-device-name',
 } as const
 
 interface INativePreferencesPayload {
   language: string
   model_path: string | null
   output_mode: OutputMode
+  input_device_name: string | null
 }
 
 const languageOptions = [
@@ -276,6 +288,20 @@ const mainNavItems: Array<{ id: AppSection; label: string; icon: ComponentType<S
   { id: 'permissions', label: 'Permissions', icon: IconShieldCheck },
 ]
 
+function getInputDeviceIcon(name: string): ComponentType<SVGProps<SVGSVGElement>> {
+  const normalizedName = name.toLowerCase()
+  if (normalizedName.includes('airpods') || normalizedName.includes('headphone') || normalizedName.includes('buds')) {
+    return IconHeadphones
+  }
+  if (normalizedName.includes('iphone') || normalizedName.includes('phone')) return IconSmartphone
+  if (normalizedName.includes('macbook') || normalizedName.includes('laptop')) return IconLaptop
+  return IconMic
+}
+
+function getInputDeviceLabel(device: IInputDeviceInfo) {
+  return device.is_default ? `${device.name} (Default)` : device.name
+}
+
 function MainApp() {
   // _Ref
   const stateRef = useRef<DictationState>('idle')
@@ -298,7 +324,9 @@ function MainApp() {
   const [downloadingModelId, setDownloadingModelId] = useState<string | null>(null)
   const [downloadProgress, setDownloadProgress] = useState<Record<string, IModelDownloadProgress>>({})
   const [uninstallingModelId, setUninstallingModelId] = useState<string | null>(null)
-  const [inputDeviceName, setInputDeviceName] = useState<string>('')
+  const [inputDeviceName, setInputDeviceName] = useState(() => readStoredPreference('inputDeviceName'))
+  const [inputDevices, setInputDevices] = useState<IInputDeviceInfo[]>([])
+  const [isInputDeviceMenuOpen, setIsInputDeviceMenuOpen] = useState(false)
 
   // _Callback
   const updateDictationState = useCallback((nextState: DictationState) => {
@@ -327,13 +355,18 @@ function MainApp() {
     }
   }, [])
 
-  const refreshInputDevice = useCallback(async () => {
+  const refreshInputDevices = useCallback(async () => {
     try {
-      const name = await invoke<string>('get_input_device_name')
-      setInputDeviceName(name)
+      const devices = await invoke<IInputDeviceInfo[]>('list_input_devices')
+      setInputDevices(devices)
     } catch {
-      setInputDeviceName('')
+      setInputDevices([])
     }
+  }, [])
+
+  const selectInputDevice = useCallback((name: string | null) => {
+    setInputDeviceName(name ?? '')
+    setIsInputDeviceMenuOpen(false)
   }, [])
 
   const toggleDictation = useCallback(async () => {
@@ -399,7 +432,7 @@ function MainApp() {
 
   useEffect(() => {
     void refreshStatus()
-    void refreshInputDevice()
+    void refreshInputDevices()
 
     const unlistenState = listen<DictationState>('dictation-state', (event) => {
       updateDictationState(event.payload)
@@ -428,6 +461,10 @@ function MainApp() {
       setLanguage(event.payload.language)
       setModelPath(event.payload.model_path ?? '')
       setOutputMode(event.payload.output_mode)
+      setInputDeviceName(event.payload.input_device_name ?? '')
+    })
+    const unlistenInputDevices = listen<IInputDeviceInfo[]>('input-devices-updated', (event) => {
+      setInputDevices(event.payload)
     })
     const unlistenDownloadProgress = listen<IModelDownloadProgress>('model-download-progress', (event) => {
       setDownloadProgress((items) => ({ ...items, [event.payload.model_id]: event.payload }))
@@ -440,9 +477,10 @@ function MainApp() {
       void unlistenTray.then((dispose) => dispose())
       void unlistenSettings.then((dispose) => dispose())
       void unlistenPreferences.then((dispose) => dispose())
+      void unlistenInputDevices.then((dispose) => dispose())
       void unlistenDownloadProgress.then((dispose) => dispose())
     }
-  }, [refreshStatus, refreshInputDevice, updateDictationState])
+  }, [refreshStatus, refreshInputDevices, updateDictationState])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -468,8 +506,24 @@ function MainApp() {
   }, [outputMode])
 
   useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.inputDeviceName, inputDeviceName)
+  }, [inputDeviceName])
+
+  useEffect(() => {
     localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history))
   }, [history])
+
+  useEffect(() => {
+    if (!isInputDeviceMenuOpen) return
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('.toolbar-device-menu')) return
+      setIsInputDeviceMenuOpen(false)
+    }
+
+    window.addEventListener('pointerdown', onPointerDown)
+    return () => window.removeEventListener('pointerdown', onPointerDown)
+  }, [isInputDeviceMenuOpen])
 
   useEffect(() => {
     if (!modelPath || !availableModels.length) return
@@ -481,10 +535,11 @@ function MainApp() {
       language,
       model_path: modelPath.trim() || null,
       output_mode: outputMode,
+      input_device_name: inputDeviceName.trim() || null,
     }
     void invoke('set_native_preferences', { preferences })
     void emit('preferences-updated', preferences)
-  }, [language, modelPath, outputMode])
+  }, [language, modelPath, outputMode, inputDeviceName])
 
   // _Memo
   const stateLabel: Record<DictationState, string> = {
@@ -529,6 +584,13 @@ function MainApp() {
   )
   const multilingualExtraModels = appDataExtraModels.filter((model) => model.multilingual)
   const englishExtraModels = appDataExtraModels.filter((model) => !model.multilingual)
+  const selectedInputDevice = inputDeviceName
+    ? inputDevices.find((device) => device.name === inputDeviceName)
+    : inputDevices.find((device) => device.is_default)
+  const inputDeviceLabel = selectedInputDevice
+    ? getInputDeviceLabel(selectedInputDevice)
+    : inputDeviceName || 'System default mic'
+  const InputDeviceIcon = selectedInputDevice ? getInputDeviceIcon(selectedInputDevice.name) : IconMic
 
   const renderCatalogModel = (model: IModelCatalogItem) => {
     const installedPath = model.installed_path
@@ -731,15 +793,56 @@ function MainApp() {
             <p>{sectionTitle[activeSection].subtitle}</p>
           </div>
           <div className="toolbar-actions" data-tauri-drag-region="false">
-            <button
-              type="button"
-              className="toolbar-device"
-              onClick={() => void refreshInputDevice()}
-              title="Default input device"
-            >
-              <IconMic aria-hidden="true" />
-              <span>{inputDeviceName || 'Default mic'}</span>
-            </button>
+            <div className="toolbar-device-menu">
+              <button
+                type="button"
+                className="toolbar-device"
+                onClick={() => {
+                  setIsInputDeviceMenuOpen((value) => !value)
+                  void refreshInputDevices()
+                }}
+                title="Input microphone"
+                aria-haspopup="menu"
+                aria-expanded={isInputDeviceMenuOpen}
+              >
+                <InputDeviceIcon aria-hidden="true" />
+                <span>{inputDeviceLabel}</span>
+              </button>
+              {isInputDeviceMenuOpen ? (
+                <div className="input-device-popover" role="menu" aria-label="Input microphone">
+                  <button
+                    type="button"
+                    className={!inputDeviceName ? 'input-device-option selected' : 'input-device-option'}
+                    onClick={() => selectInputDevice(null)}
+                    role="menuitemradio"
+                    aria-checked={!inputDeviceName}
+                  >
+                    <IconMic aria-hidden="true" />
+                    <span>Use system default</span>
+                    {!inputDeviceName ? <IconCheckCircle aria-hidden="true" /> : null}
+                  </button>
+                  {inputDevices.map((device) => {
+                    const DeviceIcon = getInputDeviceIcon(device.name)
+                    const isSelected = inputDeviceName === device.name
+                    return (
+                      <button
+                        key={device.name}
+                        type="button"
+                        className={isSelected ? 'input-device-option selected' : 'input-device-option'}
+                        onClick={() => selectInputDevice(device.name)}
+                        role="menuitemradio"
+                        aria-checked={isSelected}
+                      >
+                        <DeviceIcon aria-hidden="true" />
+                        <span>{getInputDeviceLabel(device)}</span>
+                        {isSelected ? <IconCheckCircle aria-hidden="true" /> : null}
+                      </button>
+                    )
+                  })}
+                  {inputDevices.length === 0 ? <p className="input-device-empty">No microphones found</p> : null}
+                </div>
+              ) : null}
+            </div>
             <button
               type="button"
               className={dictationState === 'recording' ? 'toolbar-record stop' : 'toolbar-record'}
