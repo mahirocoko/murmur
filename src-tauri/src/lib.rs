@@ -19,7 +19,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Size, WindowEvent,
 };
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, ShortcutState};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 #[derive(Debug, Serialize)]
 struct WhisperStatus {
@@ -71,6 +71,13 @@ struct InputDeviceInfo {
 type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<File>>>>>;
 type AudioLevelThrottle = Arc<Mutex<u128>>;
 const AUDIO_WAVEFORM_BARS: usize = 78;
+const DEFAULT_DICTATION_SHORTCUT: &str = "alt+space";
+
+#[cfg(target_os = "macos")]
+#[link(name = "ApplicationServices", kind = "framework")]
+extern "C" {
+    fn AXIsProcessTrusted() -> bool;
+}
 
 struct NativeRecording {
     wav_path: PathBuf,
@@ -88,6 +95,7 @@ struct NativePreferences {
     model_path: Option<String>,
     output_mode: String,
     input_device_name: Option<String>,
+    shortcut: String,
 }
 
 impl Default for NativePreferences {
@@ -97,6 +105,7 @@ impl Default for NativePreferences {
             model_path: None,
             output_mode: "paste".to_string(),
             input_device_name: None,
+            shortcut: DEFAULT_DICTATION_SHORTCUT.to_string(),
         }
     }
 }
@@ -855,6 +864,101 @@ fn get_native_preferences(app: &AppHandle) -> Result<NativePreferences, String> 
     Ok(guard.clone())
 }
 
+fn normalize_shortcut(shortcut: String) -> String {
+    let shortcut = shortcut.trim();
+    if shortcut.is_empty() {
+        DEFAULT_DICTATION_SHORTCUT.to_string()
+    } else {
+        shortcut.to_string()
+    }
+}
+
+fn validate_dictation_shortcut(shortcut: &str) -> Result<(), String> {
+    if !shortcut.contains('+') {
+        return Err("shortcut ต้องมี modifier อย่างน้อยหนึ่งตัว".to_string());
+    }
+
+    if shortcut.eq_ignore_ascii_case("escape") || shortcut.to_ascii_lowercase().ends_with("+escape") {
+        return Err("Escape ถูกใช้สำหรับยกเลิกการอัดเสียงแล้ว".to_string());
+    }
+
+    Ok(())
+}
+
+fn is_dictation_shortcut(app: &AppHandle, shortcut: &tauri_plugin_global_shortcut::Shortcut) -> bool {
+    get_native_preferences(app)
+        .map(|preferences| shortcut.to_string().eq_ignore_ascii_case(&preferences.shortcut))
+        .unwrap_or(false)
+}
+
+fn apply_dictation_shortcut(
+    app: &AppHandle,
+    previous_shortcut: Option<&str>,
+    next_shortcut: &str,
+) -> Result<(), String> {
+    validate_dictation_shortcut(next_shortcut)?;
+
+    if previous_shortcut
+        .map(|shortcut| !shortcut.eq_ignore_ascii_case(next_shortcut))
+        .unwrap_or(true)
+    {
+        if let Some(previous_shortcut) = previous_shortcut {
+            if app.global_shortcut().is_registered(previous_shortcut) {
+                app.global_shortcut()
+                    .unregister(previous_shortcut)
+                    .map_err(|error| format!("ยกเลิก shortcut เดิมไม่สำเร็จ: {error}"))?;
+            }
+        }
+    }
+
+    if !app.global_shortcut().is_registered(next_shortcut) {
+        app.global_shortcut()
+            .register(next_shortcut)
+            .map_err(|error| format!("ลงทะเบียน shortcut ไม่สำเร็จ: {error}"))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn unregister_current_dictation_shortcut(app: AppHandle) -> Result<(), String> {
+    let preferences = get_native_preferences(&app)?;
+    if app.global_shortcut().is_registered(preferences.shortcut.as_str()) {
+        app.global_shortcut()
+            .unregister(preferences.shortcut.as_str())
+            .map_err(|error| format!("พัก shortcut เดิมไม่สำเร็จ: {error}"))?;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn restore_current_dictation_shortcut(app: AppHandle) -> Result<(), String> {
+    let preferences = get_native_preferences(&app)?;
+    apply_dictation_shortcut(&app, None, preferences.shortcut.as_str())
+}
+
+#[tauri::command]
+fn set_dictation_shortcut(app: AppHandle, shortcut: String) -> Result<(), String> {
+    let state = app.state::<NativeRecorderState>();
+    let previous_shortcut = {
+        let guard = state
+            .preferences
+            .lock()
+            .map_err(|_| "native preferences lock failed".to_string())?;
+        guard.shortcut.clone()
+    };
+    let next_shortcut = normalize_shortcut(shortcut);
+    apply_dictation_shortcut(&app, Some(&previous_shortcut), &next_shortcut)?;
+
+    let mut guard = state
+        .preferences
+        .lock()
+        .map_err(|_| "native preferences lock failed".to_string())?;
+    guard.shortcut = next_shortcut;
+    Ok(())
+}
+
 fn set_selected_input_device(
     app: &AppHandle,
     input_device_name: Option<String>,
@@ -946,6 +1050,9 @@ fn set_native_preferences(app: AppHandle, preferences: NativePreferences) -> Res
         .preferences
         .lock()
         .map_err(|_| "native preferences lock failed".to_string())?;
+    let previous_shortcut = guard.shortcut.clone();
+    let next_shortcut = normalize_shortcut(preferences.shortcut);
+    apply_dictation_shortcut(&app, Some(&previous_shortcut), &next_shortcut)?;
 
     let next_preferences = NativePreferences {
         language: if preferences.language.trim().is_empty() {
@@ -960,6 +1067,7 @@ fn set_native_preferences(app: AppHandle, preferences: NativePreferences) -> Res
         input_device_name: preferences
             .input_device_name
             .filter(|name| !name.trim().is_empty()),
+        shortcut: next_shortcut,
     };
     *guard = next_preferences.clone();
     drop(guard);
@@ -1242,22 +1350,55 @@ fn hide_main_window(app: AppHandle) -> Result<(), String> {
     window.hide().map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn open_macos_privacy_pane(pane: String) -> Result<(), String> {
+    let url = match pane.as_str() {
+        "microphone" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+        "accessibility" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+        "keyboard" => "x-apple.systempreferences:com.apple.Keyboard-Settings.extension",
+        _ => return Err("unknown privacy pane".to_string()),
+    };
+
+    Command::new("open")
+        .arg(url)
+        .status()
+        .map_err(|error| format!("เปิด System Settings ไม่สำเร็จ: {error}"))?
+        .success()
+        .then_some(())
+        .ok_or_else(|| "เปิด System Settings ไม่สำเร็จ".to_string())
+}
+
+#[tauri::command]
+fn get_accessibility_permission_status() -> bool {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        AXIsProcessTrusted()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
 fn setup_global_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
     app.plugin(
         tauri_plugin_global_shortcut::Builder::new()
-            .with_shortcuts(["alt+space"])
-            .expect("default dictation shortcut should be valid")
             .with_handler(|app, shortcut, event| {
                 if event.state != ShortcutState::Pressed {
                     return;
                 }
 
-                if shortcut.matches(Modifiers::ALT, Code::Space) {
+                if is_dictation_shortcut(app, shortcut) {
                     let _ = toggle_native_recording(app.clone());
                 }
             })
             .build(),
     )?;
+
+    app.global_shortcut()
+        .register(DEFAULT_DICTATION_SHORTCUT)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error.to_string()))?;
 
     Ok(())
 }
@@ -1488,10 +1629,15 @@ pub fn run() {
             get_input_device_name,
             hide_indicator,
             hide_main_window,
+            get_accessibility_permission_status,
+            open_macos_privacy_pane,
             paste_clipboard,
             show_indicator,
+            set_dictation_shortcut,
             set_native_preferences,
             toggle_native_recording,
+            unregister_current_dictation_shortcut,
+            restore_current_dictation_shortcut,
             cancel_native_recording
         ])
         .run(tauri::generate_context!())

@@ -68,23 +68,28 @@ interface IInputDeviceInfo {
 
 type DictationState = 'idle' | 'requesting-mic' | 'recording' | 'transcribing' | 'pasting' | 'done' | 'error'
 type OutputMode = 'copy' | 'paste'
+type CaptureMode = 'quick' | 'review' | 'transform'
 type SettingsSection = 'general' | 'history' | 'models' | 'permissions'
 type AppSection = 'home' | SettingsSection
 
 const APP_NAME = 'Murmur'
 const HISTORY_STORAGE_KEY = 'murmur-history'
 const LEGACY_HISTORY_STORAGE_KEY = 'mahiro-whisper-history'
+const CAPTURE_MODE_STORAGE_KEY = 'murmur-capture-mode'
+const DEFAULT_SHORTCUT = 'alt+space'
 const STORAGE_KEYS = {
   language: 'murmur-language',
   modelPath: 'murmur-model-path',
   outputMode: 'murmur-output-mode',
   inputDeviceName: 'murmur-input-device-name',
+  shortcut: 'murmur-shortcut',
 } as const
 const LEGACY_STORAGE_KEYS = {
   language: 'mahiro-whisper-language',
   modelPath: 'mahiro-whisper-model-path',
   outputMode: 'mahiro-whisper-output-mode',
   inputDeviceName: 'mahiro-whisper-input-device-name',
+  shortcut: 'mahiro-whisper-shortcut',
 } as const
 
 interface INativePreferencesPayload {
@@ -92,6 +97,7 @@ interface INativePreferencesPayload {
   model_path: string | null
   output_mode: OutputMode
   input_device_name: string | null
+  shortcut: string
 }
 
 const languageOptions = [
@@ -131,6 +137,64 @@ function readTranscriptHistory() {
 
 function readStoredPreference(key: keyof typeof STORAGE_KEYS, fallback = '') {
   return localStorage.getItem(STORAGE_KEYS[key]) ?? localStorage.getItem(LEGACY_STORAGE_KEYS[key]) ?? fallback
+}
+
+function readStoredCaptureMode(): CaptureMode {
+  const storedMode = localStorage.getItem(CAPTURE_MODE_STORAGE_KEY)
+  return storedMode === 'quick' || storedMode === 'review' || storedMode === 'transform' ? storedMode : 'quick'
+}
+
+function formatShortcut(shortcut: string) {
+  return shortcut
+    .split('+')
+    .filter(Boolean)
+    .map((part) => {
+      const normalized = part.toLowerCase()
+      if (normalized === 'alt' || normalized === 'option') return '⌥'
+      if (normalized === 'shift') return '⇧'
+      if (normalized === 'control' || normalized === 'ctrl') return '⌃'
+      if (normalized === 'super' || normalized === 'command' || normalized === 'cmd' || normalized === 'meta')
+        return '⌘'
+      if (normalized === 'space') return 'Space'
+      if (normalized.startsWith('key') && normalized.length === 4) return normalized.slice(3).toUpperCase()
+      if (normalized.startsWith('digit') && normalized.length === 6) return normalized.slice(5)
+      return part.replace(/^./, (char) => char.toUpperCase())
+    })
+    .join(' ')
+}
+
+interface IShortcutKeyboardEvent {
+  code: string
+  metaKey: boolean
+  ctrlKey: boolean
+  altKey: boolean
+  shiftKey: boolean
+}
+
+function shortcutFromKeyboardEvent(event: IShortcutKeyboardEvent) {
+  const key = event.code === 'Space' ? 'space' : event.code
+  const isModifierOnly = [
+    'AltLeft',
+    'AltRight',
+    'ShiftLeft',
+    'ShiftRight',
+    'ControlLeft',
+    'ControlRight',
+    'MetaLeft',
+    'MetaRight',
+  ].includes(event.code)
+
+  if (isModifierOnly || event.code === 'Escape') return null
+
+  const parts: string[] = []
+  if (event.metaKey) parts.push('super')
+  if (event.ctrlKey) parts.push('control')
+  if (event.altKey) parts.push('alt')
+  if (event.shiftKey) parts.push('shift')
+  if (!parts.length) return null
+
+  parts.push(key)
+  return parts.join('+')
 }
 
 function prependTranscriptHistory(items: string[], transcript: string) {
@@ -307,6 +371,7 @@ function getInputDeviceLabel(device: IInputDeviceInfo) {
 function MainApp() {
   // _Ref
   const stateRef = useRef<DictationState>('idle')
+  const shortcutCaptureCommittedRef = useRef(false)
 
   // _State
   const [activeSection, setActiveSection] = useState<AppSection>('home')
@@ -329,6 +394,11 @@ function MainApp() {
   const [inputDeviceName, setInputDeviceName] = useState(() => readStoredPreference('inputDeviceName'))
   const [inputDevices, setInputDevices] = useState<IInputDeviceInfo[]>([])
   const [isInputDeviceMenuOpen, setIsInputDeviceMenuOpen] = useState(false)
+  const [captureMode, setCaptureMode] = useState<CaptureMode>(readStoredCaptureMode)
+  const [shortcut, setShortcut] = useState(() => readStoredPreference('shortcut', DEFAULT_SHORTCUT))
+  const [isShortcutCaptureActive, setIsShortcutCaptureActive] = useState(false)
+  const [shortcutCaptureMessage, setShortcutCaptureMessage] = useState<string | null>(null)
+  const [isAccessibilityTrusted, setIsAccessibilityTrusted] = useState<boolean | null>(null)
 
   // _Callback
   const updateDictationState = useCallback((nextState: DictationState) => {
@@ -338,14 +408,16 @@ function MainApp() {
 
   const refreshStatus = useCallback(async () => {
     try {
-      const [status, models, catalog] = await Promise.all([
+      const [status, models, catalog, accessibilityTrusted] = await Promise.all([
         invoke<IWhisperStatus>('get_whisper_status'),
         invoke<IModelInfo[]>('list_available_models'),
         invoke<IModelCatalogItem[]>('list_model_catalog'),
+        invoke<boolean>('get_accessibility_permission_status'),
       ])
       setWhisperStatus(status)
       setAvailableModels(models)
       setModelCatalog(catalog)
+      setIsAccessibilityTrusted(accessibilityTrusted)
     } catch (error) {
       setWhisperStatus({
         available: false,
@@ -356,6 +428,54 @@ function MainApp() {
       })
     }
   }, [])
+
+  const openPermissionPane = useCallback((pane: 'microphone' | 'accessibility' | 'keyboard') => {
+    void invoke('open_macos_privacy_pane', { pane })
+    if (pane === 'accessibility') {
+      window.setTimeout(() => {
+        void invoke<boolean>('get_accessibility_permission_status').then(setIsAccessibilityTrusted)
+      }, 800)
+    }
+  }, [])
+
+  const beginShortcutCapture = useCallback(() => {
+    shortcutCaptureCommittedRef.current = false
+    setShortcutCaptureMessage(null)
+    setIsShortcutCaptureActive(true)
+    void invoke('unregister_current_dictation_shortcut')
+  }, [])
+
+  const cancelShortcutCapture = useCallback(() => {
+    setIsShortcutCaptureActive(false)
+    setShortcutCaptureMessage(null)
+    if (!shortcutCaptureCommittedRef.current) void invoke('restore_current_dictation_shortcut')
+  }, [])
+
+  const updateShortcut = useCallback((nextShortcut: string) => {
+    shortcutCaptureCommittedRef.current = true
+    setShortcut(nextShortcut)
+    setShortcutCaptureMessage(null)
+    setIsShortcutCaptureActive(false)
+    void invoke('set_dictation_shortcut', { shortcut: nextShortcut })
+  }, [])
+
+  const handleShortcutCaptureKeyDown = useCallback(
+    (event: IShortcutKeyboardEvent & { preventDefault: () => void; stopPropagation: () => void }) => {
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.code === 'Escape') {
+        cancelShortcutCapture()
+        return
+      }
+      const nextShortcut = shortcutFromKeyboardEvent(event)
+      if (nextShortcut) {
+        updateShortcut(nextShortcut)
+      } else {
+        setShortcutCaptureMessage('ต้องกดพร้อม modifier เช่น ⌥, ⌘, ⌃ หรือ ⇧')
+      }
+    },
+    [cancelShortcutCapture, updateShortcut],
+  )
 
   const refreshInputDevices = useCallback(async () => {
     try {
@@ -485,6 +605,21 @@ function MainApp() {
   }, [refreshStatus, refreshInputDevices, updateDictationState])
 
   useEffect(() => {
+    if (activeSection !== 'permissions') return
+    void invoke<boolean>('get_accessibility_permission_status').then(setIsAccessibilityTrusted)
+  }, [activeSection])
+
+  useEffect(() => {
+    if (!isShortcutCaptureActive) return
+    window.addEventListener('keydown', handleShortcutCaptureKeyDown, true)
+    window.addEventListener('keyup', handleShortcutCaptureKeyDown, true)
+    return () => {
+      window.removeEventListener('keydown', handleShortcutCaptureKeyDown, true)
+      window.removeEventListener('keyup', handleShortcutCaptureKeyDown, true)
+    }
+  }, [handleShortcutCaptureKeyDown, isShortcutCaptureActive])
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       if (stateRef.current !== 'recording') return
@@ -512,8 +647,16 @@ function MainApp() {
   }, [inputDeviceName])
 
   useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.shortcut, shortcut)
+  }, [shortcut])
+
+  useEffect(() => {
     localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history))
   }, [history])
+
+  useEffect(() => {
+    localStorage.setItem(CAPTURE_MODE_STORAGE_KEY, captureMode)
+  }, [captureMode])
 
   useEffect(() => {
     if (!isInputDeviceMenuOpen) return
@@ -538,10 +681,11 @@ function MainApp() {
       model_path: modelPath.trim() || null,
       output_mode: outputMode,
       input_device_name: inputDeviceName.trim() || null,
+      shortcut,
     }
     void invoke('set_native_preferences', { preferences })
     void emit('preferences-updated', preferences)
-  }, [language, modelPath, outputMode, inputDeviceName])
+  }, [language, modelPath, outputMode, inputDeviceName, shortcut])
 
   // _Memo
   const stateLabel: Record<DictationState, string> = {
@@ -553,11 +697,12 @@ function MainApp() {
     done: outputMode === 'paste' ? 'Pasted' : 'Copied',
     error: 'Needs attention',
   }
+  const shortcutLabel = formatShortcut(shortcut)
 
   const stateDetail: Record<DictationState, string> = {
-    idle: `Press ⌥ Space from any app, or record here. Output: ${outputMode === 'paste' ? 'auto-paste' : 'copy only'}.`,
+    idle: `Press ${shortcutLabel} from any app, or record here. Output: ${outputMode === 'paste' ? 'auto-paste' : 'copy only'}.`,
     'requesting-mic': 'Waiting for macOS microphone access.',
-    recording: 'Speak normally. Press ⌥ Space again when you are done.',
+    recording: `Speak normally. Press ${shortcutLabel} again when you are done.`,
     transcribing: 'Audio is being converted locally through whisper.cpp.',
     pasting: 'The transcript is on the clipboard and is being sent to the active app.',
     done: outputMode === 'paste' ? 'Transcript was copied and pasted.' : 'Transcript was copied to the clipboard.',
@@ -616,9 +761,16 @@ function MainApp() {
           className="model-pick"
           onClick={() => (installedPath ? setModelPath(installedPath) : undefined)}
           disabled={!installedPath}
+          aria-pressed={isSelected}
         >
           <span className="model-icon">
-            {installedPath ? <IconHardDrive aria-hidden="true" /> : <IconCloud aria-hidden="true" />}
+            {isSelected ? (
+              <IconCheckCircle aria-hidden="true" className="selected-check" />
+            ) : installedPath ? (
+              <IconHardDrive aria-hidden="true" />
+            ) : (
+              <IconCloud aria-hidden="true" />
+            )}
           </span>
           <span className="model-main">
             <strong>{model.name}</strong>
@@ -661,23 +813,31 @@ function MainApp() {
     )
   }
 
-  const renderExtraModel = (model: IModelInfo) => (
-    <button
-      key={model.path}
-      type="button"
-      className={modelPath === model.path ? 'model-row selected' : 'model-row'}
-      onClick={() => setModelPath(model.path)}
-    >
-      <span className="model-icon">
-        <IconHardDrive aria-hidden="true" />
-      </span>
-      <span className="model-main">
-        <strong>{model.name}</strong>
-        <small>{model.path}</small>
-      </span>
-      <span className="model-meta">App data</span>
-    </button>
-  )
+  const renderExtraModel = (model: IModelInfo) => {
+    const isSelected = modelPath === model.path
+    return (
+      <button
+        key={model.path}
+        type="button"
+        className={isSelected ? 'model-row selected' : 'model-row'}
+        onClick={() => setModelPath(model.path)}
+        aria-pressed={isSelected}
+      >
+        <span className="model-icon">
+          {isSelected ? (
+            <IconCheckCircle aria-hidden="true" className="selected-check" />
+          ) : (
+            <IconHardDrive aria-hidden="true" />
+          )}
+        </span>
+        <span className="model-main">
+          <strong>{model.name}</strong>
+          <small>{model.path}</small>
+        </span>
+        <span className="model-meta">App data</span>
+      </button>
+    )
+  }
 
   const sectionTitle: Record<AppSection, { title: string; subtitle: string }> = {
     home: { title: 'Home', subtitle: 'Local dictation status and recent activity.' },
@@ -719,7 +879,7 @@ function MainApp() {
     {
       id: 'record',
       title: 'Try a recording',
-      detail: 'Press ⌥ Space from any app, or use the button above.',
+      detail: `Press ${shortcutLabel} from any app, or use the button above.`,
       done: dictationState === 'done' || history.length > 0,
       action: { label: primaryLabel, onClick: () => void toggleDictation() },
     },
@@ -741,8 +901,35 @@ function MainApp() {
               void invoke('hide_main_window').catch(() => getCurrentWindow().hide())
             }}
           />
-          <span className="traffic-dim" aria-hidden="true" />
-          <span className="traffic-dim" aria-hidden="true" />
+          <button
+            type="button"
+            className="window-minimize"
+            aria-label={`Minimize ${APP_NAME}`}
+            title="Minimize"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              void getCurrentWindow().minimize()
+            }}
+          />
+          <button
+            type="button"
+            className="window-maximize"
+            aria-label={`Maximize ${APP_NAME}`}
+            title="Maximize"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={async (event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              const win = getCurrentWindow()
+              if (await win.isMaximized()) {
+                await win.unmaximize()
+              } else {
+                await win.maximize()
+              }
+            }}
+          />
         </div>
 
         <div className="sidebar-brand" data-tauri-drag-region>
@@ -880,16 +1067,35 @@ function MainApp() {
                 <div className="metric-card">
                   <span className="metric-label">Output</span>
                   <strong className="metric-value">{outputMode === 'paste' ? 'Auto-paste' : 'Copy only'}</strong>
-                  <span className="metric-detail">{language}</span>
+                  <span className="metric-detail">
+                    {captureMode === 'quick' ? 'Quick mode' : `${captureMode} (Soon)`} · {language}
+                  </span>
                 </div>
                 <div className="metric-card">
                   <span className="metric-label">Shortcut</span>
-                  <strong className="metric-value">
-                    <kbd>⌥</kbd> <kbd>Space</kbd>
-                  </strong>
+                  <strong className="metric-value">{shortcutLabel}</strong>
                   <span className="metric-detail">Toggle dictation</span>
                 </div>
               </div>
+
+              <section className="home-card home-shortcut-card">
+                <div className="panel-heading">
+                  <h2>Keyboard shortcut</h2>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveSection('general')
+                      window.setTimeout(beginShortcutCapture)
+                    }}
+                  >
+                    Change
+                  </button>
+                </div>
+                <div className="home-shortcut-row">
+                  <strong>{shortcutLabel}</strong>
+                  <span>Toggle dictation from any app. Default is ⌥ Space.</span>
+                </div>
+              </section>
 
               <section className="home-card">
                 <div className="panel-heading">
@@ -932,18 +1138,86 @@ function MainApp() {
                 ) : history[0] ? (
                   <p className="transcript-text muted">{history[0]}</p>
                 ) : (
-                  <p className="empty">No transcripts yet. Press ⌥ Space to record.</p>
+                  <p className="empty">No transcripts yet. Press {shortcutLabel} to record.</p>
                 )}
                 <p className="state-detail">{stateDetail[dictationState]}</p>
               </section>
+
+              <div className="privacy-banner">
+                <IconShieldCheck aria-hidden="true" />
+                <div className="privacy-banner-content">
+                  <strong>100% On-device & Private</strong>
+                  <span>
+                    ทุกเสียงที่บันทึกและการประมวลผลคำบอกภาษาผ่าน whisper.cpp จะทำงานบน Mac ของคุณทั้งหมดแบบ Local-first
+                    ไม่มีการส่งไฟล์เสียงหรือข้อความไปยังคลาวด์ภายนอก มั่นใจในความเป็นส่วนตัวระดับสูงสุด
+                  </span>
+                </div>
+              </div>
             </div>
           ) : null}
 
           {activeSection === 'general' ? (
-            <div className="settings-section">
-              <h2>Dictation</h2>
-              <div className="choice-group" aria-label="Language">
-                <span className="field-label">Language</span>
+            <div className="settings-section general-settings-section">
+              <div className="panel-heading">
+                <h2>General Settings</h2>
+              </div>
+
+              <div className="settings-group">
+                <div className="model-group">
+                  <span>Capture Mode</span>
+                </div>
+                <div className="choice-grid three-column">
+                  <button
+                    type="button"
+                    className={captureMode === 'quick' ? 'choice-card selected' : 'choice-card'}
+                    onClick={() => setCaptureMode('quick')}
+                    aria-pressed={captureMode === 'quick'}
+                  >
+                    <div className="choice-card-header">
+                      <strong>Quick Mode</strong>
+                      {captureMode === 'quick' && <IconCheckCircle className="selected-check" aria-hidden="true" />}
+                    </div>
+                    <span>ถอดภาษาความเร็วสูงและสั่งพิมพ์ลงในแอปที่กำลังเปิดทันที</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="choice-card is-disabled"
+                    disabled
+                    style={{ position: 'relative' }}
+                    title="Coming soon"
+                    aria-pressed={false}
+                  >
+                    <div className="choice-card-header">
+                      <strong>Review First</strong>
+                    </div>
+                    <span>แสดงหน้าต่างตรวจสอบความถูกต้องของข้อความก่อนวาง (Soon)</span>
+                    <span className="badge-soon" aria-hidden="true">
+                      Soon
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="choice-card is-disabled"
+                    disabled
+                    style={{ position: 'relative' }}
+                    title="Coming soon"
+                    aria-pressed={false}
+                  >
+                    <div className="choice-card-header">
+                      <strong>Transform Mode</strong>
+                    </div>
+                    <span>แปลงภาษา จัดรูปแบบ หรือปรับสำนวนด้วย AI เพิ่มเติม (Soon)</span>
+                    <span className="badge-soon" aria-hidden="true">
+                      Soon
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="settings-group">
+                <div className="model-group">
+                  <span>Language Options</span>
+                </div>
                 <div className="choice-grid two-column">
                   {languageOptions.map((option) => (
                     <button
@@ -951,15 +1225,22 @@ function MainApp() {
                       type="button"
                       className={language === option.value ? 'choice-card selected' : 'choice-card'}
                       onClick={() => setLanguage(option.value)}
+                      aria-pressed={language === option.value}
                     >
-                      <strong>{option.label}</strong>
+                      <div className="choice-card-header">
+                        <strong>{option.label}</strong>
+                        {language === option.value && <IconCheckCircle className="selected-check" aria-hidden="true" />}
+                      </div>
                       <span>{option.detail}</span>
                     </button>
                   ))}
                 </div>
               </div>
-              <div className="choice-group" aria-label="Output">
-                <span className="field-label">Output</span>
+
+              <div className="settings-group">
+                <div className="model-group">
+                  <span>Output Behavior</span>
+                </div>
                 <div className="choice-grid">
                   {outputOptions.map((option) => (
                     <button
@@ -967,11 +1248,88 @@ function MainApp() {
                       type="button"
                       className={outputMode === option.value ? 'choice-card selected' : 'choice-card'}
                       onClick={() => setOutputMode(option.value)}
+                      aria-pressed={outputMode === option.value}
                     >
-                      <strong>{option.label}</strong>
+                      <div className="choice-card-header">
+                        <strong>{option.label}</strong>
+                        {outputMode === option.value && (
+                          <IconCheckCircle className="selected-check" aria-hidden="true" />
+                        )}
+                      </div>
                       <span>{option.detail}</span>
                     </button>
                   ))}
+                </div>
+              </div>
+
+              <div className="settings-group">
+                <div className="model-group">
+                  <span>Keyboard Shortcut</span>
+                </div>
+                <div className="shortcut-setting-row">
+                  <button
+                    type="button"
+                    className={isShortcutCaptureActive ? 'shortcut-recorder is-recording' : 'shortcut-recorder'}
+                    onClick={beginShortcutCapture}
+                    onKeyDown={(event) => {
+                      if (!isShortcutCaptureActive) return
+                      handleShortcutCaptureKeyDown(event)
+                    }}
+                  >
+                    <strong>{isShortcutCaptureActive ? 'Press shortcut…' : formatShortcut(shortcut)}</strong>
+                    <span>
+                      {isShortcutCaptureActive
+                        ? (shortcutCaptureMessage ?? 'Use at least one modifier เช่น Option, Command, Control หรือ Shift')
+                        : 'Click แล้วกดคีย์ลัดใหม่เพื่อเปลี่ยนจากค่า default'}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="shortcut-reset"
+                    onClick={() =>
+                      isShortcutCaptureActive ? cancelShortcutCapture() : updateShortcut(DEFAULT_SHORTCUT)
+                    }
+                  >
+                    {isShortcutCaptureActive ? 'Cancel' : 'Reset'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="settings-group">
+                <div className="model-group">
+                  <span>Microphone / Input Device</span>
+                </div>
+                <div className="choice-grid two-column">
+                  <button
+                    type="button"
+                    className={!inputDeviceName ? 'choice-card selected' : 'choice-card'}
+                    onClick={() => selectInputDevice(null)}
+                    aria-pressed={!inputDeviceName}
+                  >
+                    <div className="choice-card-header">
+                      <strong>Use system default mic</strong>
+                      {!inputDeviceName && <IconCheckCircle className="selected-check" aria-hidden="true" />}
+                    </div>
+                    <span>ติดตามไมโครโฟนเริ่มต้นของระบบ macOS โดยอัตโนมัติ</span>
+                  </button>
+                  {inputDevices.map((device) => {
+                    const isSelected = inputDeviceName === device.name
+                    return (
+                      <button
+                        key={device.name}
+                        type="button"
+                        className={isSelected ? 'choice-card selected' : 'choice-card'}
+                        onClick={() => selectInputDevice(device.name)}
+                        aria-pressed={isSelected}
+                      >
+                        <div className="choice-card-header">
+                          <strong>{getInputDeviceLabel(device)}</strong>
+                          {isSelected && <IconCheckCircle className="selected-check" aria-hidden="true" />}
+                        </div>
+                        <span>สตรีมเสียงจากอุปกรณ์การ์ดรับสัญญาณ CPAL นี้</span>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             </div>
@@ -993,9 +1351,14 @@ function MainApp() {
                   type="button"
                   className={modelPath ? 'model-row' : 'model-row selected'}
                   onClick={() => setModelPath('')}
+                  aria-pressed={!modelPath}
                 >
                   <span className="model-icon">
-                    <IconCheckCircle aria-hidden="true" />
+                    {!modelPath ? (
+                      <IconCheckCircle aria-hidden="true" className="selected-check" />
+                    ) : (
+                      <IconCircleDot aria-hidden="true" />
+                    )}
                   </span>
                   <span className="model-main">
                     <strong>Auto select</strong>
@@ -1042,19 +1405,68 @@ function MainApp() {
           ) : null}
 
           {activeSection === 'permissions' ? (
-            <div className="settings-section">
-              <h2>Permissions</h2>
-              <div className="permission-item">
-                <strong>Microphone</strong>
-                <span>Required for recording.</span>
+            <div className="settings-section permissions-section">
+              <div className="panel-heading">
+                <h2>Permissions</h2>
               </div>
-              <div className="permission-item">
-                <strong>Accessibility</strong>
-                <span>Required for auto-paste.</span>
-              </div>
-              <div className="permission-item">
-                <strong>Global shortcut</strong>
-                <span>Used by ⌥ Space.</span>
+              <button
+                type="button"
+                className={inputDevices.length ? 'permission-switch-row is-on' : 'permission-switch-row'}
+                onClick={() => openPermissionPane('microphone')}
+                role="switch"
+                aria-checked={inputDevices.length > 0}
+              >
+                <span className="permission-copy">
+                  <strong>Microphone</strong>
+                  <span>
+                    {inputDevices.length
+                      ? `${inputDevices.length} input device${inputDevices.length > 1 ? 's' : ''} available.`
+                      : 'Allow Murmur to record audio from your Mac.'}
+                  </span>
+                </span>
+                <span className="permission-toggle" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={isAccessibilityTrusted ? 'permission-switch-row is-on' : 'permission-switch-row'}
+                onClick={() => openPermissionPane('accessibility')}
+                role="switch"
+                aria-checked={Boolean(isAccessibilityTrusted)}
+              >
+                <span className="permission-copy">
+                  <strong>Accessibility</strong>
+                  <span>
+                    {isAccessibilityTrusted
+                      ? 'Enabled for Auto-paste.'
+                      : 'Needed for Auto-paste. macOS requires you to enable this manually in System Settings.'}
+                  </span>
+                </span>
+                <span className="permission-toggle" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="permission-switch-row is-on"
+                onClick={() => openPermissionPane('keyboard')}
+                role="switch"
+                aria-checked={true}
+              >
+                <span className="permission-copy">
+                  <strong>Global shortcut</strong>
+                  <span>
+                    {shortcutLabel} is registered while Murmur is running. Open Keyboard settings if macOS blocks it.
+                  </span>
+                </span>
+                <span className="permission-toggle" aria-hidden="true" />
+              </button>
+              <div className="permission-item privacy-note">
+                <IconShieldCheck aria-hidden="true" />
+                <div>
+                  <strong>Local-first Privacy Commitment</strong>
+                  <span>
+                    Murmur มุ่งเน้นความเป็นส่วนตัวของคุณโดยไม่มีการเก็บประวัติ คุกกี้ หรือวิเคราะห์พฤติกรรมบนคลาวด์
+                    ข้อมูลเสียงถูกแปลงและประมวลผลบนชิปเครื่อง Mac ของคุณเอง 100%
+                  </span>
+                </div>
               </div>
             </div>
           ) : null}
