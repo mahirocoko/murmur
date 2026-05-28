@@ -111,11 +111,10 @@ const outputOptions: Array<{ value: OutputMode; label: string; detail: string }>
 const WAVE_BAR_COUNT = 78
 const WAVE_SCROLL_STEP = 2
 const LOADING_WAVE_BAR_COUNT = WAVE_BAR_COUNT
-const LOADING_WAVE_PATTERN = [1, 0.66, 0.84, 0.5, 0.74, 0.94, 0.58, 0.82, 0.62] as const
 
 type LoadingBarStyle = CSSProperties & {
   '--wave-delay': string
-  '--wave-duration': string
+  '--wave-idle': string
   '--wave-peak': string
 }
 
@@ -239,16 +238,20 @@ function IndicatorWindow() {
               <i key={index} style={{ height: `${height}px`, opacity: 0.38 + Math.min(height / 44, 0.54) }} />
             ))
           : loadingBarIndices.map((index) => {
-              const peak = LOADING_WAVE_PATTERN[index % LOADING_WAVE_PATTERN.length]
-              const duration = state === 'pasting' ? '0.88s' : '1.08s'
+              const progress = index / (LOADING_WAVE_BAR_COUNT - 1)
+              const center = 0.4
+              const envelope = Math.exp(-Math.pow((progress - center) / 0.29, 2))
+              const shoulder = Math.exp(-Math.pow((progress - 0.6) / 0.48, 2)) * 0.06
+              const peak = Math.min(1, 0.08 + Math.pow(envelope, 1.32) * 0.88 + shoulder)
+              const idle = Math.max(0.075, peak * 0.16)
 
               return (
                 <i
                   key={index}
                   style={
                     {
-                      '--wave-delay': `${index * -58}ms`,
-                      '--wave-duration': duration,
+                      '--wave-delay': `${index * -4}ms`,
+                      '--wave-idle': idle.toFixed(3),
                       '--wave-peak': peak.toString(),
                     } as LoadingBarStyle
                   }

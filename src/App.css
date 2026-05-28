@@ -950,13 +950,13 @@ button.model-row {
   width: 100%;
 }
 .loading-wave i {
-  width: 0.16rem;
+  width: 0.14rem;
   height: 3.8rem;
   min-height: 0.13rem;
   background: linear-gradient(180deg, rgba(255, 248, 226, 0.98), var(--warning));
   transform-origin: center;
   transform: translateZ(0) scaleY(0.12);
-  animation: loading-equalizer var(--wave-duration, 1.08s) ease-in-out infinite both;
+  animation: loading-equalizer 1.08s cubic-bezier(0.42, 0, 0.2, 1) infinite both;
   animation-delay: var(--wave-delay, 0ms);
   will-change: transform, opacity;
 }
@@ -1046,8 +1046,8 @@ kbd {
 @keyframes loading-equalizer {
   0%,
   100% {
-    opacity: 0.36;
-    transform: translateZ(0) scaleY(0.12);
+    opacity: 0.4;
+    transform: translateZ(0) scaleY(var(--wave-idle, 0.12));
   }
   50% {
     opacity: 0.96;

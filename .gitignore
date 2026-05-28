@@ -36,3 +36,5 @@ dist-ssr
 
 # Astro
 .astro/
+
+.antigravitycli
